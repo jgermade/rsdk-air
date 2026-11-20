@@ -55,6 +55,8 @@ per process, and a game never runs in the launcher's process. That rule is now a
 The launcher code ends up in the same process as both a GPL engine and the RSDK
 engines, so it has to be compatible with both.
 
+**Decision (2026-11-20): option A, MIT** (`LICENSE`). The project is open source and non-profit.
+
 | Option | Works with GPL S3AIR | Works with RSDK | Notes |
 | --- | --- | --- | --- |
 | **A. MIT or zlib (recommended)** | Yes | Yes | Simple, matches SDL2/ImGui; anyone may reuse the launcher |
@@ -67,7 +69,14 @@ RSDK engines are: no paid builds, no ads, no in-app payments.
 
 ## Release checklist (from the licenses)
 
-- [ ] `RETRO_DISABLE_PLUS=ON` in every CI/release build of RSDKv3, v4 and v5U.
+- [ ] `RETRO_DISABLE_PLUS=ON` in every CI/release build of RSDKv3, v4 and v5U. It defines
+      `RSDK_AUTOBUILD=1`, which in the upstream code:
+      - sets `game.hasPlusDLC` to 0 (RSDKv3/v4 and v5's legacy modes);
+      - RSDKv3 (Sonic CD): blocks playing as Knuckles or Amy and skips Amy's hammer hitboxes;
+      - RSDKv4 (Sonic 1/2): blocks playing as Amy;
+      - RSDKv5U (Mania): forces every DummyCore DLC value off, so no Mania Plus content
+        (Mighty, Ray, Encore mode).
+      Base games are unaffected. A setting to turn DLC on is allowed only if it is off by default.
 - [ ] Each engine's license file shipped next to its module (`licenses/` folder).
 - [ ] A credits screen in the launcher naming Christian Whitehead (RSDK v3/v4), Evening Star
       (RSDK v5), Rubberduckycooly, st×tic and chuliRMG (decompilations), and Eukaryot
