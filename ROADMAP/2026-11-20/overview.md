@@ -87,14 +87,13 @@ gantt
 | Engines assume they own the process (`exit()`, `SDL_Quit`, global state) | The launcher runs each game in a child process (desktop) or a separate Android process |
 | Sonic 3 A.I.R. build is large and has its own framework (rmx, oxygen) | Do it last; start from its own CMake and Android projects |
 | RSDKv5U loads game logic dynamically (`Game.dll`) | Link the Mania logic into the v5 module (static game logic option) |
-| Licenses are non-commercial and differ per engine | Keep each engine's license next to its module; ship no game data; review before any release |
+| Sonic 3 A.I.R. is GPL-3.0 and the RSDK engines are non-commercial: they cannot be combined | Never in the same process (aggregation only); see upstreams-and-licensing.md |
 | macOS signing/notarization | Unsigned builds for now; signing is a later decision |
 
 ## Open questions
 
-- Which upstream forks and commits to pin for each engine. The wasm-gaming packages
-  use `RSDKModding/RSDKv5-Decompilation`, `RSDKModding/Sonic-Mania-Decompilation`,
-  `mattConn/Sonic-Decompilation-WASM` (RSDKv4) and `Eukaryot/sonic3air`; native builds
-  may need the RSDKModding v3/v4 decompilations instead.
+- Upstream repositories and pinned tags: resolved, see
+  [upstreams-and-licensing.md](upstreams-and-licensing.md).
+- License for our own code: options in [upstreams-and-licensing.md](upstreams-and-licensing.md).
 - Where game data lives by default on each platform (proposed: SDL `SDL_GetPrefPath`,
   one folder per game).
