@@ -67,6 +67,29 @@ engines, so it has to be compatible with both.
 Whatever we pick, the **distributed bundle as a whole is non-commercial**, because the
 RSDK engines are: no paid builds, no ads, no in-app payments.
 
+## Plus DLC builds for personal use
+
+The RSDK licenses only restrict **pre-built executables given to anyone**. Building with
+Plus on for yourself is allowed. Design:
+
+- CMake option `RSDKAIR_ENABLE_PLUS` (default `OFF`). `OFF` passes
+  `RETRO_DISABLE_PLUS=ON` to RSDKv3, v4 and v5U; `ON` leaves the DLC enabled.
+- The CI workflow has a `workflow_dispatch` boolean input `enable_plus` (default `false`).
+- It only takes effect in a **private** repository:
+
+  ```yaml
+  env:
+    ENABLE_PLUS: ${{ inputs.enable_plus && github.event.repository.private }}
+  ```
+
+  In a public repo (like this one) artifacts can be downloaded by any GitHub user, so a
+  Plus build there would count as distribution.
+- Plus builds are never released: the release job fails if `ENABLE_PLUS` is true. Their
+  artifacts get a `-plus-private` suffix and short retention (e.g. 7 days).
+- For personal use: a **private copy** of this repo (`git push --mirror` to a new private
+  repo; a GitHub fork of a public repo cannot be private), run the workflow with
+  `enable_plus`, and do not share the artifacts with anyone, including collaborators.
+
 ## Release checklist (from the licenses)
 
 - [ ] `RETRO_DISABLE_PLUS=ON` in every CI/release build of RSDKv3, v4 and v5U. It defines
