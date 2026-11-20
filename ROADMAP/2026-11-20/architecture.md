@@ -133,3 +133,20 @@ gantt
   the dummy module cannot be resolved.
 - Until M2, the picker is an SDL message box with one button per available game.
 - Android uses `c++_shared` so the launcher and the engine module share one C++ runtime.
+
+## Implementation notes (M1, 2026-11-20)
+
+- **Upstream patches** are applied at configure time to copies in the build tree
+  (`rsdkair_patch_begin/replace/end`, `cmake/RsdkAir.cmake`); each anchor must match
+  exactly once, so an upstream change fails loudly. Submodules stay untouched.
+- **Export list enforced by the linker** (`--version-script` / `-exported_symbols_list`):
+  some upstream headers (tinyxml2) force default visibility, so `-fvisibility=hidden` alone
+  is not enough. A test checks that only `rsdkair_engine_*` resolves.
+- **rsdkv4 paths**: data folder read-only; `settings.ini`, `SData.bin` and `mods/` in the
+  save folder. `settings.ini` `[Dev] DataFile` points at `Data.rsdk` relative to the save
+  folder. Windows/Linux run with the save folder as working directory; macOS and Android get
+  it through one patched line in `InitUserdata` (no app bundle path, no Java call).
+- **Slots**: `-- --slot <n> --player <p>` sets `SkipStartMenu` and starts the slot through
+  the bridge ported from rsdkv4-wasm; without it the game shows its own menus. The launcher
+  reads the same slots from `SData.bin` (`saves_rsdkv4.hpp`) for the M2 slot screen.
+- RSDKv4 is built with networking off (Sonic 2 2P VS over the network is not offered).

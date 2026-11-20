@@ -21,6 +21,8 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build
 ./build/bin/rsdk-air --list
+./build/bin/rsdk-air --game sonic2                         # the game's own menus
+./build/bin/rsdk-air --game sonic2 -- --slot 0 --player 1  # straight into save slot 0 as Tails
 ```
 
 Android (JDK 17, Android SDK with NDK 27.2.12479018 and CMake 3.22.1):
@@ -39,7 +41,7 @@ content. Only for builds you keep for yourself: never distribute them.
 | `include/rsdkair/engine.h` | The C ABI every engine module exports |
 | `src/core/` | Launcher logic without SDL: game catalog, data detection, ROM checks, module loading, child processes |
 | `src/launcher/` | The `rsdk-air` executable (`libmain.so` on Android) |
-| `engines/` | Engine modules (added from M1); `dummy/` is a test-only module |
+| `engines/` | Engine modules: `rsdkv4/` (Sonic 1, Sonic 2); `deps/` (ogg, vorbis, GLEW); `dummy/` is test-only |
 | `android/` | Gradle project: `LauncherActivity` + `GameActivity` in a `:game` process |
 | `third_party/` | SDL2 and the engines, as pinned git submodules |
 | `site/` | Landing page, deployed by `release.yml` |

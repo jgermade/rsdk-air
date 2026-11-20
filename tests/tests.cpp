@@ -3,11 +3,14 @@
 #include <rsdkair/catalog.hpp>
 #include <rsdkair/cli.hpp>
 #include <rsdkair/detect.hpp>
+#include <rsdkair/engine.h>
+#include <rsdkair/ini.hpp>
 #include <rsdkair/module.hpp>
 #include <rsdkair/paths.hpp>
 #include <rsdkair/process.hpp>
 #include <rsdkair/rom.hpp>
 #include <rsdkair/run_engine.hpp>
+#include <rsdkair/saves_rsdkv4.hpp>
 
 #include <cstdio>
 #include <cstdlib>
@@ -67,6 +70,20 @@ std::vector<std::uint8_t> fake_rom(std::size_t size, const char *serial)
 }
 
 const fs::path kDummyModule = path_from_utf8(RSDKAIR_DUMMY_MODULE);
+#ifdef RSDKAIR_RSDKV4_MODULE
+const fs::path kRsdkv4Module = path_from_utf8(RSDKAIR_RSDKV4_MODULE);
+#endif
+
+void write_save_ram(const fs::path &file, const std::vector<std::int32_t> &ints)
+{
+    std::vector<std::uint8_t> bytes(rsdkv4::kSaveRamInts * 4, 0);
+    for (std::size_t i = 0; i < ints.size(); ++i) {
+        const auto v = static_cast<std::uint32_t>(ints[i]);
+        for (int b = 0; b < 4; ++b)
+            bytes[i * 4 + static_cast<std::size_t>(b)] = static_cast<std::uint8_t>(v >> (8 * b));
+    }
+    write_file(file, bytes);
+}
 
 // --- test cases --------------------------------------------------------------
 
@@ -247,6 +264,126 @@ void test_child_process()
     CHECK(run_child(exe.parent_path() / "no-such-program", {}, error) != 0);
 }
 
+
+void test_ini()
+{
+    std::string text = "[Dev]\nDevMenu=false\nDataFile = Data.rsdk\n\n[Game]\nLanguage=0\n";
+    text = ini_set(text, "Dev", "datafile", "../../games/sonic1/Data.rsdk");
+    CHECK(ini_get(text, "Dev", "DataFile") == "../../games/sonic1/Data.rsdk");
+    CHECK(ini_get(text, "Dev", "DevMenu") == "false");
+    CHECK(text.find("Data.rsdk\n\n[Game]") != std::string::npos);  // replaced in place
+
+    text = ini_set(text, "Game", "SkipStartMenu", "true");
+    CHECK(ini_get(text, "Game", "SkipStartMenu") == "true");
+    CHECK(ini_get(text, "Game", "Language") == "0");
+
+    text = ini_set(text, "Window", "VSync", "true");
+    CHECK(ini_get(text, "Window", "VSync") == "true");
+    CHECK(ini_get(text, "Dev", "VSync").empty());
+
+    CHECK(ini_get(ini_set("", "Dev", "DataFile", "x"), "Dev", "DataFile") == "x");
+    CHECK(ini_get("[Dev]\r\nKey=1\r\n", "dev", "key") == "1");
+
+    const fs::path dir = temp_dir("ini");
+    CHECK(ini_set_file(dir / "settings.ini", "Dev", "DataFile", "a"));
+    CHECK(ini_set_file(dir / "settings.ini", "Game", "SkipStartMenu", "false"));
+    const std::string written = read_file(dir / "settings.ini");
+    CHECK(ini_get(written, "Dev", "DataFile") == "a");
+    CHECK(ini_get(written, "Game", "SkipStartMenu") == "false");
+}
+
+void test_saves_rsdkv4()
+{
+    const fs::path dir = temp_dir("saves-rsdkv4");
+    CHECK(!rsdkv4::read_slots(dir));  // no save file yet
+
+    std::vector<std::int32_t> ram(rsdkv4::kSaveRamInts, 0);
+    // Slot 0: Knuckles, zone 3 (1-based) -> regular list, zone index 2.
+    ram[0 * 8 + rsdkv4::kCharacter] = 2;
+    ram[0 * 8 + rsdkv4::kLives] = 5;
+    ram[0 * 8 + rsdkv4::kScore] = 12340;
+    ram[0 * 8 + rsdkv4::kZone] = 3;
+    ram[0 * 8 + rsdkv4::kEmeralds] = 4;
+    // Slot 2: special stage 2 (129 + 1).
+    ram[2 * 8 + rsdkv4::kCharacter] = 3;
+    ram[2 * 8 + rsdkv4::kZone] = 130;
+    // Something outside the slots, which delete must keep.
+    ram[0x100] = 77;
+    write_save_ram(dir / "SData.bin", ram);
+
+    auto slots = rsdkv4::read_slots(dir);
+    CHECK(slots.has_value());
+    if (!slots)
+        return;
+    const rsdkv4::Slot &s0 = (*slots)[0];
+    CHECK(!s0.empty && s0.character == 2 && s0.lives == 5 && s0.score == 12340 && s0.emeralds == 4);
+    CHECK(s0.list == rsdkv4::kListRegular && s0.zone == 2);
+    CHECK((*slots)[1].empty && (*slots)[1].zone == -1);
+    CHECK(!(*slots)[2].empty && (*slots)[2].list == rsdkv4::kListSpecial && (*slots)[2].zone == 1);
+    CHECK((*slots)[3].empty);
+
+    std::string error;
+    CHECK(rsdkv4::delete_slot(dir, 0, error));
+    slots = rsdkv4::read_slots(dir);
+    CHECK(slots && (*slots)[0].empty && !(*slots)[2].empty);
+    CHECK(fs::file_size(dir / "SData.bin") == rsdkv4::kSaveRamInts * 4);
+    std::ifstream in(dir / "SData.bin", std::ios::binary);
+    in.seekg(0x100 * 4);
+    unsigned char b[4] = {};
+    in.read(reinterpret_cast<char *>(b), 4);
+    CHECK(b[0] == 77 && b[1] == 0);
+    CHECK(!rsdkv4::delete_slot(dir, 4, error));
+
+    // The older SGame.bin is used when there is no SData.bin.
+    const fs::path old = temp_dir("saves-rsdkv4-sgame");
+    ram.assign(rsdkv4::kSaveRamInts, 0);
+    ram[1 * 8 + rsdkv4::kZone] = 1;
+    write_save_ram(old / "SGame.bin", ram);
+    slots = rsdkv4::read_slots(old);
+    CHECK(slots && !(*slots)[1].empty && (*slots)[1].zone == 0);
+}
+
+#ifdef RSDKAIR_RSDKV4_MODULE
+void test_rsdkv4_module()
+{
+    std::string error;
+    auto module = Module::open(kRsdkv4Module, error);
+    CHECK(module != nullptr);
+    if (!module) {
+        std::fprintf(stderr, "%s\n", error.c_str());
+        return;
+    }
+    auto games = module->function<RsdkAirEngineGamesFn>("rsdkair_engine_games");
+    CHECK(games != nullptr);
+    std::vector<std::string> ids;
+    for (const RsdkAirGameInfo *const *g = games(); g && *g; ++g)
+        ids.emplace_back((*g)->id);
+    CHECK((ids == std::vector<std::string>{"sonic1", "sonic2"}));
+    // Only the ABI is exported: tinyxml2, stb and the engine stay inside.
+    CHECK(module->symbol("_ZN8tinyxml211XMLDocument5ClearEv") == nullptr);
+    CHECK(module->symbol("Engine") == nullptr);
+
+    // Without game data the engine fails cleanly, before opening any window, and the
+    // settings it needs are in the save folder.
+    const fs::path root = temp_dir("rsdkv4-module");
+    EngineRun run;
+    run.module = kRsdkv4Module;
+    run.game_id = "sonic2";
+    run.data_dir = root / "games" / "sonic2";
+    run.save_dir = root / "saves" / "sonic2";
+    fs::create_directories(run.data_dir);
+
+    run.extra_args = {"--slot", "9"};
+    CHECK(run_engine(run, error) == RSDKAIR_EXIT_BAD_ARGS);
+
+    run.extra_args = {"--slot", "1", "--player", "2"};
+    CHECK(run_engine(run, error) == RSDKAIR_EXIT_ENGINE_FAILED);
+    const std::string settings = read_file(run.save_dir / "settings.ini");
+    CHECK(ini_get(settings, "Dev", "DataFile") == "../../games/sonic2/Data.rsdk");
+    CHECK(ini_get(settings, "Game", "SkipStartMenu") == "true");
+}
+#endif
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -267,6 +404,11 @@ int main(int argc, char **argv)
         {"run_engine", test_run_engine},
         {"run_engine_errors", test_run_engine_errors},
         {"child_process", test_child_process},
+        {"ini", test_ini},
+        {"saves_rsdkv4", test_saves_rsdkv4},
+#ifdef RSDKAIR_RSDKV4_MODULE
+        {"rsdkv4_module", test_rsdkv4_module},
+#endif
     };
 
     std::vector<std::string> selected;

@@ -72,6 +72,8 @@ std::string describe_exit_code(int code)
     case kExitModuleMissing: return "the engine module could not be loaded";
     case kExitModuleInvalid: return "the engine module is invalid or does not support this game";
     case kExitSaveDirFailed: return "the save folder could not be created";
+    case RSDKAIR_EXIT_BAD_ARGS: return "the engine rejected its arguments";
+    case RSDKAIR_EXIT_ENGINE_FAILED: return "the engine could not start (game data, graphics or audio)";
     default: return "the game exited with code " + std::to_string(code);
     }
 }

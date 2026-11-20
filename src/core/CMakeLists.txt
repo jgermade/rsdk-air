@@ -10,11 +10,13 @@ add_library(rsdkair_core STATIC
     catalog.cpp
     cli.cpp
     detect.cpp
+    ini.cpp
     module.cpp
     paths.cpp
     process.cpp
     rom.cpp
-    run_engine.cpp)
+    run_engine.cpp
+    saves_rsdkv4.cpp)
 target_include_directories(rsdkair_core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CMAKE_CURRENT_BINARY_DIR}/generated")

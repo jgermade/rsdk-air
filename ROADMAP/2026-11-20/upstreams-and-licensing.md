@@ -12,6 +12,10 @@ The latest **stable release tag** of each engine, added as git submodules under
 | RSDKv5U | `RSDKModding/RSDKv5-Decompilation` | `v1.1.1` | `bd5939658fa9` | 2025-10-31 |
 | Sonic Mania logic | `RSDKModding/Sonic-Mania-Decompilation` | `v1.1.1` | `56cf1bbac45e` | 2025-11-01 |
 | Sonic 3 A.I.R. | `Eukaryot/sonic3air` | `v26.03.28.0-stable` | `29cf83c9dcc2` | 2026-03-25 |
+| SDL2 | `libsdl-org/SDL` | `release-2.32.10` | `5d249570393f` | — |
+| libogg | `xiph/ogg` | `v1.3.6` | `be05b13e98b0` | — |
+| libvorbis | `xiph/vorbis` | `v1.3.7` | `0657aee69dec` | — |
+| GLEW (pre-generated) | `Perlmint/glew-cmake` | `glew-cmake-2.2.0-2` | `632f99415e5f` | — |
 
 Notes:
 
@@ -33,6 +37,10 @@ Notes:
 | Sonic Mania decompilation | Sonic Mania Decompilation License v1 | Non-commercial; credit; no game assets; license kept in copies and forks |
 | Sonic 3 A.I.R. | **GPL-3.0** | Copyleft: whoever receives a binary must be able to get the source, and the program cannot carry extra restrictions |
 | SDL2 | zlib | Permissive |
+| libogg, libvorbis | BSD-3-Clause | Permissive |
+| GLEW | Modified BSD + MIT (Mesa, Khronos) | Permissive |
+| tinyxml2 (in RSDKv4) | zlib | Permissive |
+| stb_image (in RSDKv4) | MIT / public domain | Permissive |
 | Dear ImGui | MIT | Permissive |
 
 ### The conflict

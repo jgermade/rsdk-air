@@ -42,7 +42,8 @@ typedef struct RsdkAirEngineArgs {
 
 /* Exit codes rsdkair_engine_main may return besides the engine's own. */
 #define RSDKAIR_EXIT_OK 0
-#define RSDKAIR_EXIT_BAD_ARGS 64
+#define RSDKAIR_EXIT_BAD_ARGS 64       /* invalid arguments or unsupported game */
+#define RSDKAIR_EXIT_ENGINE_FAILED 65   /* the engine could not start (data, graphics, audio) */
 
 typedef int (*RsdkAirEngineAbiVersionFn)(void);
 typedef const RsdkAirGameInfo *const *(*RsdkAirEngineGamesFn)(void);

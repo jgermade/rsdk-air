@@ -6,7 +6,14 @@ add_dependencies(rsdkair_tests rsdkair_dummy)
 rsdkair_warnings(rsdkair_tests)
 
 # One ctest entry per test case in tests.cpp.
-foreach(name catalog cli rom detect windows_quoting module_hidden_symbols run_engine run_engine_errors child_process)
+if(TARGET rsdkv4)
+    target_compile_definitions(rsdkair_tests PRIVATE "RSDKAIR_RSDKV4_MODULE=\"$<TARGET_FILE:rsdkv4>\"")
+    add_dependencies(rsdkair_tests rsdkv4)
+    add_test(NAME rsdkv4_module COMMAND rsdkair_tests rsdkv4_module)
+endif()
+
+foreach(name catalog cli rom detect windows_quoting module_hidden_symbols run_engine run_engine_errors child_process
+        ini saves_rsdkv4)
     add_test(NAME ${name} COMMAND rsdkair_tests ${name})
 endforeach()
 

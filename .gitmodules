@@ -22,3 +22,15 @@
 	path = third_party/sonic3air
 	url = https://github.com/Eukaryot/sonic3air.git
 	shallow = true
+[submodule "third_party/ogg"]
+	path = third_party/ogg
+	url = https://github.com/xiph/ogg.git
+	shallow = true
+[submodule "third_party/vorbis"]
+	path = third_party/vorbis
+	url = https://github.com/xiph/vorbis.git
+	shallow = true
+[submodule "third_party/glew-cmake"]
+	path = third_party/glew-cmake
+	url = https://github.com/Perlmint/glew-cmake.git
+	shallow = true
