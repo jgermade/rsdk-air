@@ -92,23 +92,41 @@ Plus on for yourself is allowed. Design:
 
 ### Workflows and repository settings
 
-Only the owner runs workflows. One workflow, `build.yml`:
+Only the owner runs workflows. Two workflows:
 
-- Triggers: `workflow_dispatch` and `push` of tags `v*`. **No `pull_request` or branch
-  `push` triggers.**
-- Manual runs must come from `refs/heads/main`; tag runs check that the tagged commit is
-  on `main` (`git merge-base --is-ancestor $GITHUB_SHA origin/main`).
-- Builds Windows, Linux, macOS and Android. Plus is off; the `enable_plus` input only
-  takes effect in private repositories.
-- Tag runs on the public repo create the GitHub Release; manual runs only upload
-  short-lived artifacts.
+**`build.yml`** — tests and builds.
 
-Repository settings that keep it that way (a PR runs workflow files from its own branch,
-so a fork could add one):
+- Triggers: `push` to `main`, and `workflow_call` (used by `release.yml`) with inputs
+  `version` (string) and `enable_plus` (boolean, default `false`).
+- **No `pull_request` trigger.** Merging a PR is a push to `main`, so the merge result is
+  built.
+- Jobs: run the launcher tests (`ctest`: data detection, ROM checks, engine loader), then
+  build Windows, Linux, macOS and Android. Push runs embed a dev version
+  (`0.0.0-dev+<sha>`) and keep artifacts for a few days.
 
+**`release.yml`** — manual (`workflow_dispatch`).
+
+- Inputs: `bump` (choice: `major` / `minor` / `patch`), `enable_plus` (boolean, default
+  `false`).
+- Steps, in order:
+  1. Guard: must run from `refs/heads/main`; fail if `enable_plus` is true and the
+     repository is public.
+  2. Compute the next `vX.Y.Z` from the latest tag and `bump`.
+  3. Call `build.yml` with that version and `enable_plus`.
+  4. Create the tag and the GitHub Release on the built commit; attach the four builds
+     and `licenses/`.
+  5. Deploy the landing page (`site/`) to GitHub Pages with `actions/deploy-pages`. Skipped
+     when `enable_plus` is true: Pages is public even from a private repository.
+- The tag is created only after the build passes. `concurrency: release` prevents two
+  releases at once.
+
+Repository settings:
+
+- Settings → Pages → source: **GitHub Actions**.
 - Settings → Actions → General → fork pull request workflows: **require approval for all
-  external contributors**.
-- Tag ruleset for `v*`: only the owner can create, update or delete them.
+  external contributors** (a PR runs workflow files from its own branch).
+- Branch ruleset for `main`: only the owner can push.
+- Tag ruleset for `v*`: only the owner (and the release workflow) can create them.
 
 ## Release checklist (from the licenses)
 
