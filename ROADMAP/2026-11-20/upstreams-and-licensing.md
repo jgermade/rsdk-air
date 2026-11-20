@@ -90,6 +90,28 @@ Plus on for yourself is allowed. Design:
   repo; a GitHub fork of a public repo cannot be private), run the workflow with
   `enable_plus`, and do not share the artifacts with anyone, including collaborators.
 
+### Workflows and repository settings
+
+Two workflows:
+
+| Workflow | Triggers | Plus | Output |
+| --- | --- | --- | --- |
+| `ci.yml` | `pull_request`, `push` | Always off, no input | Build and test only, no downloadable binaries |
+| `release.yml` | `push` of tags `v*`, `workflow_dispatch` | Off; `enable_plus` input works only in private repos | GitHub Release (public repo) or private artifacts |
+
+`release.yml` checks that the tagged commit is on `main`
+(`git merge-base --is-ancestor $GITHUB_SHA origin/main`) and that manual runs come from
+`refs/heads/main`.
+
+Leaving `pull_request` out of `release.yml` is not enough on its own: for a pull
+request, GitHub runs the workflow files **from the PR branch**, so a fork can add its own
+workflow. Required repository settings:
+
+- Settings → Actions → General → fork pull request workflows: **require approval for all
+  external contributors**.
+- Tag ruleset for `v*`: only maintainers can create, update or delete them.
+- Environment `release` with a required reviewer, used by the job that publishes.
+
 ## Release checklist (from the licenses)
 
 - [ ] `RETRO_DISABLE_PLUS=ON` in every CI/release build of RSDKv3, v4 and v5U. It defines
