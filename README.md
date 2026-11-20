@@ -10,6 +10,43 @@ licenses (non-commercial RSDK decompilation licenses, GPL-3.0 for Sonic 3 A.I.R.
 
 Current plan: [`ROADMAP/2026-11-20/`](ROADMAP/2026-11-20/overview.md).
 
+## Build
+
+Needs CMake 3.22+, a C++20 compiler and, on Linux, the SDL2 build dependencies
+(X11/Wayland, ALSA/PulseAudio dev packages; see `.github/workflows/build.yml`).
+
+```bash
+git clone --recursive <this repository>
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build
+./build/bin/rsdk-air --list
+```
+
+Android (JDK 17, Android SDK with NDK 27.2.12479018 and CMake 3.22.1):
+
+```bash
+cd android && ./gradlew assembleRelease
+```
+
+`-DRSDKAIR_ENABLE_PLUS=ON` (CMake) / `-PrsdkairEnablePlus=true` (Gradle) turns on Plus DLC
+content. Only for builds you keep for yourself: never distribute them.
+
+## Layout
+
+| Path | What |
+| --- | --- |
+| `include/rsdkair/engine.h` | The C ABI every engine module exports |
+| `src/core/` | Launcher logic without SDL: game catalog, data detection, ROM checks, module loading, child processes |
+| `src/launcher/` | The `rsdk-air` executable (`libmain.so` on Android) |
+| `engines/` | Engine modules (added from M1); `dummy/` is a test-only module |
+| `android/` | Gradle project: `LauncherActivity` + `GameActivity` in a `:game` process |
+| `third_party/` | SDL2 and the engines, as pinned git submodules |
+| `site/` | Landing page, deployed by `release.yml` |
+| `.github/workflows/` | `build.yml` (push to main) and `release.yml` (manual) |
+
+## Project conventions
+
 - [`AGENTS.md`](AGENTS.md) — rules for agents (`CLAUDE.md` symlinks to it).
 - [`ROADMAP/`](ROADMAP/) — project plan by date, with Mermaid Gantt diagrams.
 - [`RECORD/`](RECORD/) — project memory (`.WIP` append-only, `.completed` read-only).

@@ -1,0 +1,73 @@
+plugins {
+    id 'com.android.application'
+}
+
+def rsdkairVersion = project.property('rsdkairVersion').toString()
+def rsdkairEnablePlus = project.property('rsdkairEnablePlus').toString().toBoolean()
+
+// versionCode from X.Y.Z (dev builds: 1).
+def versionMatch = (rsdkairVersion =~ /^(\d+)\.(\d+)\.(\d+)/)
+def rsdkairVersionCode = versionMatch.find()
+    ? versionMatch.group(1).toInteger() * 10000 + versionMatch.group(2).toInteger() * 100 + versionMatch.group(3).toInteger()
+    : 1
+if (rsdkairVersionCode < 1) rsdkairVersionCode = 1
+
+android {
+    namespace 'org.rsdkair.launcher'
+    compileSdk 35
+    ndkVersion '27.2.12479018'
+
+    defaultConfig {
+        applicationId 'org.rsdkair.launcher'
+        minSdk 24
+        targetSdk 35
+        versionCode rsdkairVersionCode
+        versionName rsdkairVersion
+
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_STL=c++_shared',
+                          '-DRSDKAIR_BUILD_TESTS=OFF',
+                          "-DRSDKAIR_VERSION=${rsdkairVersion}",
+                          "-DRSDKAIR_ENABLE_PLUS=${rsdkairEnablePlus ? 'ON' : 'OFF'}"
+                targets 'rsdk-air', 'SDL2'
+            }
+        }
+        ndk {
+            abiFilters 'arm64-v8a', 'x86_64'
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path '../../CMakeLists.txt'
+            version '3.22.1'
+        }
+    }
+
+    sourceSets {
+        main {
+            // SDL's Java side (SDLActivity and friends), used as is from the submodule.
+            java.srcDirs += '../../third_party/SDL/android-project/app/src/main/java'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Installable without a keystore for now: signed with the build machine's
+            // debug key, so CI builds cannot update each other in place. M5 adds a real
+            // release key (repository secret).
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+    }
+}

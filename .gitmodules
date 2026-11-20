@@ -1,0 +1,24 @@
+[submodule "third_party/SDL"]
+	path = third_party/SDL
+	url = https://github.com/libsdl-org/SDL.git
+	shallow = true
+[submodule "third_party/RSDKv3-Decompilation"]
+	path = third_party/RSDKv3-Decompilation
+	url = https://github.com/RSDKModding/RSDKv3-Decompilation.git
+	shallow = true
+[submodule "third_party/RSDKv4-Decompilation"]
+	path = third_party/RSDKv4-Decompilation
+	url = https://github.com/RSDKModding/RSDKv4-Decompilation.git
+	shallow = true
+[submodule "third_party/RSDKv5-Decompilation"]
+	path = third_party/RSDKv5-Decompilation
+	url = https://github.com/RSDKModding/RSDKv5-Decompilation.git
+	shallow = true
+[submodule "third_party/Sonic-Mania-Decompilation"]
+	path = third_party/Sonic-Mania-Decompilation
+	url = https://github.com/RSDKModding/Sonic-Mania-Decompilation.git
+	shallow = true
+[submodule "third_party/sonic3air"]
+	path = third_party/sonic3air
+	url = https://github.com/Eukaryot/sonic3air.git
+	shallow = true

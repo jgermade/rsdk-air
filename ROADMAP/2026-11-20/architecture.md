@@ -21,10 +21,10 @@ Build output on desktop:
 ```
 rsdk-air(.exe)
 SDL2.dll / libSDL2.so / libSDL2.dylib
-engines/rsdkv3.{dll,so,dylib}
-engines/rsdkv4.{dll,so,dylib}
-engines/rsdkv5.{dll,so,dylib}
-engines/sonic3air.{dll,so,dylib}
+engines/rsdkv3.{dll,so}      (.so on Linux and macOS: CMake MODULE libraries)
+engines/rsdkv4.{dll,so}
+engines/rsdkv5.{dll,so}
+engines/sonic3air.{dll,so}
 ```
 
 ## Engine ABI
@@ -119,3 +119,17 @@ gantt
     Desktop child process + relaunch        :a2, after a1, 3d
     Android two-process SDLActivity setup   :a3, 2027-01-05, 6d
 ```
+
+## Implementation notes (M0, 2026-11-20)
+
+- The launcher **never loads an engine module**, not even to list games: the game table
+  lives in the launcher (`src/core/catalog.cpp`). This keeps GPL and non-commercial code
+  out of the launcher's process. `rsdkair_engine_games()` is only used in the game process
+  to confirm the module supports the requested game.
+- The ABI exports a third function, `rsdkair_engine_abi_version()`, checked before
+  anything else is called.
+- Modules are opened with `RTLD_NOW | RTLD_LOCAL` (`LoadLibraryExW` on Windows) and built
+  with hidden visibility and `--exclude-libs,ALL`; a test checks that a hidden symbol in
+  the dummy module cannot be resolved.
+- Until M2, the picker is an SDL message box with one button per available game.
+- Android uses `c++_shared` so the launcher and the engine module share one C++ runtime.
