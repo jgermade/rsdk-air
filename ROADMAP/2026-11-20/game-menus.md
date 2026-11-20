@@ -71,17 +71,16 @@ void rsdkair_engine_request_exit(int code);
 
 ### Art
 
-The wasm apps ship zone portraits, character icons and game illustrations. They are
-SEGA's characters and screenshots, so rsdk-air **does not put them in the repository or
-the releases** (the same rule as for game data: see upstreams-and-licensing.md). Options:
+**Decision (2026-11-20): reuse the wasm-gaming art** (zone portraits, character icons,
+covers and illustrations from `rsdkv4-wasm`, `rsdkv5-wasm` and play.germade), like many
+non-profit fan projects (Sonic 3 A.I.R., Retro Sonic, mods) that SEGA has long tolerated.
 
-1. **Extract them at runtime from the player's own `Data.rsdk`** (zone title cards,
-   save-select sprites), cached in `<root>/cache/`. Needs a small RSDK pack reader and
-   research into which sprites each game has.
-2. **Neutral art drawn by us**: coloured zone tag, character initials, no screenshots.
-   Always works, and is the fallback when (1) finds nothing.
-
-Plan: start with (2), add (1) per game.
+- All of it lives in one folder, `art/`, with a `art/README.md` listing each file and where
+  it came from, so it can be removed or replaced in one go if SEGA ever asks.
+- The code never requires it: a missing image falls back to neutral art (coloured zone tag,
+  character initials).
+- The landing page and releases keep the "Not affiliated with or endorsed by SEGA" notice.
+- Later, optional: extract zone art from the player's own `Data.rsdk` instead.
 
 ## Milestones affected
 
@@ -91,7 +90,7 @@ Plan: start with (2), add (1) per game.
   pause overlay in the game process (ABI v2); English and Spanish.
 - **M3**: Mania slots (8, with its own bridge); Sonic CD and Sonic 3 A.I.R. get the pause
   menu and keep their own save select until a bridge exists.
-- **M6**: art extracted from `Data.rsdk`; settings and controls screens.
+- **M6**: settings and controls screens; optionally, zone art from `Data.rsdk`.
 
 ## Risks
 
@@ -112,6 +111,7 @@ gantt
     SData.bin reader + tests            :g1, 2026-11-30, 2d
     rsdkv4 bridge (slot, pause, screens) :g2, after g1, 3d
     section M2
+    art/ folder from wasm-gaming        :g0, after g2, 1d
     ImGui + UX.md input rules           :g3, after g2, 3d
     Load-game screen (Sonic 1/2)        :g4, after g3, 3d
     Pause overlay (ABI v2)              :g5, after g4, 4d
@@ -119,5 +119,5 @@ gantt
     Mania slots + bridge                :g6, 2026-12-28, 5d
     Pause menu for Sonic CD and S3AIR   :g7, after g6, 3d
     section M6
-    Art from Data.rsdk                  :g8, 2027-01-25, 5d
+    Zone art from Data.rsdk (optional)  :g8, 2027-01-25, 5d
 ```
