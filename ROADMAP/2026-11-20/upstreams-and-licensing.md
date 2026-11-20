@@ -92,25 +92,23 @@ Plus on for yourself is allowed. Design:
 
 ### Workflows and repository settings
 
-Two workflows:
+Only the owner runs workflows. One workflow, `build.yml`:
 
-| Workflow | Triggers | Plus | Output |
-| --- | --- | --- | --- |
-| `ci.yml` | `pull_request`, `push` | Always off, no input | Build and test only, no downloadable binaries |
-| `release.yml` | `push` of tags `v*`, `workflow_dispatch` | Off; `enable_plus` input works only in private repos | GitHub Release (public repo) or private artifacts |
+- Triggers: `workflow_dispatch` and `push` of tags `v*`. **No `pull_request` or branch
+  `push` triggers.**
+- Manual runs must come from `refs/heads/main`; tag runs check that the tagged commit is
+  on `main` (`git merge-base --is-ancestor $GITHUB_SHA origin/main`).
+- Builds Windows, Linux, macOS and Android. Plus is off; the `enable_plus` input only
+  takes effect in private repositories.
+- Tag runs on the public repo create the GitHub Release; manual runs only upload
+  short-lived artifacts.
 
-`release.yml` checks that the tagged commit is on `main`
-(`git merge-base --is-ancestor $GITHUB_SHA origin/main`) and that manual runs come from
-`refs/heads/main`.
-
-Leaving `pull_request` out of `release.yml` is not enough on its own: for a pull
-request, GitHub runs the workflow files **from the PR branch**, so a fork can add its own
-workflow. Required repository settings:
+Repository settings that keep it that way (a PR runs workflow files from its own branch,
+so a fork could add one):
 
 - Settings → Actions → General → fork pull request workflows: **require approval for all
   external contributors**.
-- Tag ruleset for `v*`: only maintainers can create, update or delete them.
-- Environment `release` with a required reviewer, used by the job that publishes.
+- Tag ruleset for `v*`: only the owner can create, update or delete them.
 
 ## Release checklist (from the licenses)
 
