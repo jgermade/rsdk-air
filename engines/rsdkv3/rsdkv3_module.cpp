@@ -49,6 +49,15 @@ bool supported(const char *id)
 // Where InitUserdata puts gamePath on macOS and Android (patched Userdata.cpp).
 const char *rsdkair_rsdkv3_game_path() { return g_game_path.c_str(); }
 
+#if RETRO_PLATFORM == RETRO_OSX
+// Upstream implements this in dependencies/mac/cocoaHelpers.mm (the app bundle's resources);
+// the only caller left is the engine's log, which goes to the save folder like everything else.
+void getResourcesPath(char *buffer, int bufferSize)
+{
+    std::snprintf(buffer, static_cast<std::size_t>(bufferSize), "%s", g_game_path.c_str());
+}
+#endif
+
 extern "C" {
 
 RSDKAIR_EXPORT int rsdkair_engine_abi_version(void) { return RSDKAIR_ABI_VERSION; }
