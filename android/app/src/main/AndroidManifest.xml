@@ -11,6 +11,12 @@
 
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Sonic 3 A.I.R. is played in its official app; the picker checks whether it is
+         installed (package visibility, Android 11+) and hands it the ROM. -->
+    <queries>
+        <package android:name="org.eukaryot.sonic3air" />
+    </queries>
+
     <application
         android:label="@string/app_name"
         android:allowBackup="true"
@@ -41,5 +47,12 @@
             android:excludeFromRecents="true"
             android:configChanges="layoutDirection|locale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
             android:preferMinimalPostProcessing="true" />
+
+        <!-- Read-only access to the Sonic 3 A.I.R. ROM for the app it is handed to. -->
+        <provider
+            android:name=".RomProvider"
+            android:authorities="${applicationId}.rom"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

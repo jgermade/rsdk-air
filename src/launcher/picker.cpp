@@ -175,6 +175,19 @@ std::string engine_label(std::string_view module)
     return label;
 }
 
+// A game that is played in another app, with where to get that app (Android only:
+// Sonic 3 A.I.R.'s official app). Empty when the game has no such app.
+std::string get_app_url(const GameStatus &game)
+{
+#if defined(__ANDROID__)
+    if (game.spec->module == "sonic3air" && !game.engine_found)
+        return "https://sonic3air.org/";
+#else
+    (void)game;
+#endif
+    return {};
+}
+
 enum class Action { None, Left, Right, Up, Down, Accept, Back };
 
 } // namespace
@@ -513,6 +526,11 @@ struct Picker::Impl {
             chip_col = rgba(80, 220, 140);
             return "Your game data was found. Press Play to start.";
         }
+        if (!get_app_url(game).empty()) {
+            chip = "App not installed";
+            chip_col = rgba(240, 190, 80);
+            return "Sonic 3 A.I.R. runs in its own app. Install it from sonic3air.org, then come back here.";
+        }
         if (!game.engine_found) {
             chip = "Coming soon";
             chip_col = rgba(240, 190, 80);
@@ -526,7 +544,7 @@ struct Picker::Impl {
         return game.reason;
     }
 
-    // Sets play_min/max to the Play button (left at zero when the game cannot be played).
+    // Sets play_min/max to the Play (or "Get the app") button; left at zero when inactive.
     void draw_details(ImDrawList *dl, const Layout &l, const GameStatus &game, ImVec2 &play_min, ImVec2 &play_max)
     {
         const float u = l.u;
@@ -582,8 +600,11 @@ struct Picker::Impl {
         pill(chip, chip_col, with_alpha(chip_col, 0.45f));
 
         const ImVec2 bmin(rx, y + 28.0f * u + 18.0f * u), bmax(rx + std::min(right_w, 190.0f * u), bmin.y + 52.0f * u);
-        const std::string label = game.available ? "Play" : chip;
-        dl->AddRectFilled(bmin, bmax, game.available ? IM_COL32_WHITE : rgba(255, 255, 255, 26), 999.0f);
+        // A game in an app that is not installed gets a "Get the app" button instead.
+        const bool get_app = !game.available && !get_app_url(game).empty();
+        const bool active = game.available || get_app;
+        const std::string label = game.available ? "Play" : get_app ? "Get the app" : chip;
+        dl->AddRectFilled(bmin, bmax, active ? IM_COL32_WHITE : rgba(255, 255, 255, 26), 999.0f);
         const ImVec2 ls = measure(font_bold, 19.0f * u, label);
         float lx = (bmin.x + bmax.x - ls.x) / 2;
         if (game.available) {
@@ -591,11 +612,13 @@ struct Picker::Impl {
             const float ty = (bmin.y + bmax.y) / 2;
             dl->AddTriangleFilled(ImVec2(lx - 22.0f * u, ty - 7.5f * u), ImVec2(lx - 22.0f * u, ty + 7.5f * u),
                                   ImVec2(lx - 9.0f * u, ty), rgba(14, 13, 20));
+        }
+        if (active) {
             play_min = bmin;
             play_max = bmax;
         }
         text(dl, font_bold, 19.0f * u, ImVec2(lx, (bmin.y + bmax.y - ls.y) / 2),
-             game.available ? rgba(14, 13, 20) : rgba(160, 160, 172), label);
+             active ? rgba(14, 13, 20) : rgba(160, 160, 172), label);
     }
 
     void draw_hint(ImDrawList *dl, float &x, float y, float u, const char *glyph, ImU32 glyph_col, const char *key,
@@ -841,8 +864,11 @@ int Picker::choose(const std::vector<GameStatus> &games)
                 s.confirm_quit = true;
                 s.confirm_focus = 0;  // No
             } else if (a == Action::Accept) {
-                if (games[static_cast<std::size_t>(s.focus)].available)
+                const GameStatus &game = games[static_cast<std::size_t>(s.focus)];
+                if (game.available)
                     chosen = s.focus;
+                else if (const std::string url = get_app_url(game); !url.empty())
+                    SDL_OpenURL(url.c_str());
             } else {
                 s.move_focus(a, count);
             }
@@ -939,7 +965,8 @@ int Picker::choose(const std::vector<GameStatus> &games)
         }
         s.draw_tile(dl, l, games[static_cast<std::size_t>(s.focus)], s.focus, dt);  // on top
         s.draw_details(dl, l, games[static_cast<std::size_t>(s.focus)], play_min, play_max);
-        s.draw_hints(dl, u, games[static_cast<std::size_t>(s.focus)].available);
+        const GameStatus &focused = games[static_cast<std::size_t>(s.focus)];
+        s.draw_hints(dl, u, focused.available || !get_app_url(focused).empty());
         s.draw_confirm(ImGui::GetForegroundDrawList(), u, dt, confirm_rects);
         ImGui::Render();
 

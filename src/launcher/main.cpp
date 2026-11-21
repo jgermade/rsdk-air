@@ -23,6 +23,8 @@
 #include <SDL.h>
 
 #include <cstdio>
+#include <initializer_list>
+#include <string_view>
 #include <string>
 #include <vector>
 
@@ -47,6 +49,56 @@ fs::path default_data_root()
     return root;
 }
 
+#if defined(__ANDROID__)
+// Sonic 3 A.I.R. on Android is played in its official app (sonic3air.org), which takes
+// the ROM the way it takes one from a file manager. See LauncherActivity.java.
+constexpr const char *kS3airPackage = "org.eukaryot.sonic3air";
+
+// Calls a LauncherActivity method (boolean result) with string arguments.
+bool call_activity(const char *method, const char *signature, std::initializer_list<std::string> args)
+{
+    auto *env = static_cast<JNIEnv *>(SDL_AndroidGetJNIEnv());
+    auto activity = static_cast<jobject>(SDL_AndroidGetActivity());
+    if (!env || !activity)
+        return false;
+    jclass cls = env->GetObjectClass(activity);
+    jmethodID id = env->GetMethodID(cls, method, signature);
+    bool result = false;
+    if (id) {
+        std::vector<jstring> jargs;
+        for (const std::string &arg : args)
+            jargs.push_back(env->NewStringUTF(arg.c_str()));
+        if (jargs.size() == 1)
+            result = env->CallBooleanMethod(activity, id, jargs[0]);
+        else if (jargs.size() == 2)
+            result = env->CallBooleanMethod(activity, id, jargs[0], jargs[1]);
+        for (jstring j : jargs)
+            env->DeleteLocalRef(j);
+    }
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        result = false;
+    }
+    env->DeleteLocalRef(cls);
+    env->DeleteLocalRef(activity);
+    return result;
+}
+#endif
+
+// Whether this build can run a game's engine. On Android, Sonic 3 A.I.R. counts as
+// available when its official app is installed; everything else is an engine module.
+std::string probe_platform_engine(std::string_view module)
+{
+#if defined(__ANDROID__)
+    if (module == "sonic3air") {
+        if (call_activity("isAppInstalled", "(Ljava/lang/String;)Z", {kS3airPackage}))
+            return {};
+        return "the Sonic 3 A.I.R. app is not installed";
+    }
+#endif
+    return probe_engine(module);
+}
+
 void show_error(const std::string &title, const std::string &message)
 {
     std::fprintf(stderr, "%s: %s\n", title.c_str(), message.c_str());
@@ -56,7 +108,7 @@ void show_error(const std::string &title, const std::string &message)
 int list_games(const fs::path &root)
 {
     std::printf("Data folder: %s\n\n", path_to_utf8(root).c_str());
-    for (const GameStatus &status : detect_games(root)) {
+    for (const GameStatus &status : detect_games(root, probe_platform_engine)) {
         std::printf("%-8s %-22s %s\n", std::string(status.spec->id).c_str(), std::string(status.spec->title).c_str(),
                     status.available ? "available" : ("not available: " + status.reason).c_str());
     }
@@ -70,7 +122,7 @@ int run_game(const Options &options, const fs::path &root)
         show_error(kAppName, "Unknown game: " + options.game);
         return kExitGameUnavailable;
     }
-    const GameStatus status = detect_game(root, *game);
+    const GameStatus status = detect_game(root, *game, probe_platform_engine);
     if (!status.available) {
         show_error(std::string(game->title), status.reason);
         return status.engine_found ? kExitGameUnavailable : kExitModuleMissing;
@@ -92,8 +144,33 @@ int run_game(const Options &options, const fs::path &root)
 
 #if defined(__ANDROID__)
 // Asks LauncherActivity (android/) to start GameActivity in the ":game" process.
+// Waits until the player comes back from a game (another activity or app).
+bool wait_for_return(std::string &error)
+{
+    SDL_Event event;
+    while (SDL_WaitEvent(&event)) {
+        if (event.type == SDL_APP_DIDENTERFOREGROUND)
+            return true;
+        if (event.type == SDL_QUIT) {
+            error.clear();
+            return false;
+        }
+    }
+    return true;
+}
+
 bool start_game_process(const GameSpec &game, const fs::path &root, std::string &error)
 {
+    if (game.module == "sonic3air") {
+        const fs::path rom = game_data_dir(root, game) / path_from_utf8(std::string(game.required.front()));
+        if (!call_activity("startExternalGame", "(Ljava/lang/String;Ljava/lang/String;)Z",
+                           {kS3airPackage, path_to_utf8(rom)})) {
+            error = "the Sonic 3 A.I.R. app could not open the ROM";
+            return false;
+        }
+        return wait_for_return(error);
+    }
+
     auto *env = static_cast<JNIEnv *>(SDL_AndroidGetJNIEnv());
     auto activity = static_cast<jobject>(SDL_AndroidGetActivity());
     if (!env || !activity) {
@@ -119,17 +196,7 @@ bool start_game_process(const GameSpec &game, const fs::path &root, std::string 
         return false;
     }
 
-    // Wait until the player comes back from the game.
-    SDL_Event event;
-    while (SDL_WaitEvent(&event)) {
-        if (event.type == SDL_APP_DIDENTERFOREGROUND)
-            return true;
-        if (event.type == SDL_QUIT) {
-            error.clear();
-            return false;
-        }
-    }
-    return true;
+    return wait_for_return(error);
 }
 #else
 bool start_game_process(const GameSpec &game, const fs::path &root, std::string &error)
@@ -154,7 +221,7 @@ bool start_game_process(const GameSpec &game, const fs::path &root, std::string 
 int run_message_box_picker(const fs::path &root)
 {
     for (;;) {
-        const std::vector<GameStatus> games = detect_games(root);
+        const std::vector<GameStatus> games = detect_games(root, probe_platform_engine);
         std::vector<const GameStatus *> available;
         for (const GameStatus &status : games) {
             if (status.available)
@@ -234,7 +301,7 @@ int run_picker(const fs::path &root)
     }
 
     for (;;) {
-        const std::vector<GameStatus> games = detect_games(root);  // again after each game
+        const std::vector<GameStatus> games = detect_games(root, probe_platform_engine);  // again after each game
         const int choice = picker.choose(games);
         if (choice < 0)
             break;
