@@ -42,3 +42,7 @@
 	path = third_party/stb
 	url = https://github.com/nothings/stb.git
 	shallow = true
+[submodule "third_party/theora"]
+	path = third_party/theora
+	url = https://github.com/xiph/theora.git
+	shallow = true

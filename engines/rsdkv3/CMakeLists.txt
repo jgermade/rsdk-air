@@ -1,0 +1,112 @@
+# rsdkv3: RSDKv3 (Sonic CD, 2011 decompilation) as an rsdk-air engine module. Sources come
+# unmodified from the pinned submodule, except the patched copy below (paths), and are
+# built with our own target instead of the upstream CMakeLists.txt, which makes an
+# executable.
+
+set(UP "${PROJECT_SOURCE_DIR}/third_party/RSDKv3-Decompilation")
+if(NOT EXISTS "${UP}/dependencies/all/tinyxml2/tinyxml2.cpp" OR NOT EXISTS "${UP}/dependencies/all/theoraplay/theoraplay.c")
+    message(FATAL_ERROR "RSDKv3 submodules missing: run 'git submodule update --init --recursive'")
+endif()
+
+# --- patches ------------------------------------------------------------------------
+# InitUserdata: where settings.ini and the saves live. On macOS and Android upstream asks
+# the app bundle / the Java activity; here the module decides (rsdkair_rsdkv3_game_path,
+# rsdkv3_module.cpp), so every platform uses the game's save folder.
+rsdkair_patch_begin(userdata "${UP}/RSDKv3/Userdata.cpp")
+rsdkair_patch_replace(userdata [=[#include "RetroEngine.hpp"]=]
+[=[#include "RetroEngine.hpp"
+
+const char *rsdkair_rsdkv3_game_path(); // rsdk-air: rsdkv3_module.cpp]=])
+rsdkair_patch_replace(userdata [=[    getResourcesPath(gamePath, sizeof(gamePath));]=]
+[=[    sprintf(gamePath, "%s", rsdkair_rsdkv3_game_path()); // rsdk-air]=])
+rsdkair_patch_replace(userdata [=[        JNIEnv *env      = (JNIEnv *)SDL_AndroidGetJNIEnv();
+        jobject activity = (jobject)SDL_AndroidGetActivity();
+        jclass cls(env->GetObjectClass(activity));
+        jmethodID method = env->GetMethodID(cls, "getBasePath", "()Ljava/lang/String;");
+        auto ret         = env->CallObjectMethod(activity, method);
+
+        strcpy(buffer, env->GetStringUTFChars((jstring)ret, NULL));]=]
+[=[        strcpy(buffer, rsdkair_rsdkv3_game_path()); // rsdk-air]=])
+rsdkair_patch_replace(userdata [=[
+        env->DeleteLocalRef(activity);
+        env->DeleteLocalRef(cls);
+    }
+#endif]=]
+[=[
+    }
+#endif]=])
+rsdkair_patch_end(userdata RSDKV3_USERDATA_CPP)
+
+set(RSDKV3_SOURCES
+    ${UP}/dependencies/all/tinyxml2/tinyxml2.cpp
+    ${UP}/dependencies/all/theoraplay/theoraplay.c
+    ${UP}/RSDKv3/Animation.cpp
+    ${UP}/RSDKv3/Audio.cpp
+    ${UP}/RSDKv3/Collision.cpp
+    ${UP}/RSDKv3/Debug.cpp
+    ${UP}/RSDKv3/Drawing.cpp
+    ${UP}/RSDKv3/Ini.cpp
+    ${UP}/RSDKv3/Input.cpp
+    ${UP}/RSDKv3/fcaseopen.c
+    ${UP}/RSDKv3/Math.cpp
+    ${UP}/RSDKv3/ModAPI.cpp
+    ${UP}/RSDKv3/Object.cpp
+    ${UP}/RSDKv3/Palette.cpp
+    ${UP}/RSDKv3/Player.cpp
+    ${UP}/RSDKv3/Reader.cpp
+    ${UP}/RSDKv3/RetroEngine.cpp
+    ${UP}/RSDKv3/Scene.cpp
+    ${UP}/RSDKv3/Scene3D.cpp
+    ${UP}/RSDKv3/Script.cpp
+    ${UP}/RSDKv3/Sprite.cpp
+    ${UP}/RSDKv3/String.cpp
+    ${UP}/RSDKv3/Text.cpp
+    ${UP}/RSDKv3/Video.cpp
+    ${RSDKV3_USERDATA_CPP}
+)
+
+rsdkair_engine_module(rsdkv3
+    rsdkv3_module.cpp
+    ${RSDKV3_SOURCES})
+
+# Upstream builds with C++17 (the mod loader needs std::filesystem).
+set_target_properties(rsdkv3 PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+
+target_include_directories(rsdkv3 PRIVATE
+    "${UP}/RSDKv3"
+    "${UP}/dependencies/all/theoraplay"
+    "${UP}/dependencies/all/tinyxml2")
+if(APPLE)
+    target_include_directories(rsdkv3 PRIVATE "${UP}/dependencies/mac")  # cocoaHelpers.hpp
+endif()
+
+target_compile_definitions(rsdkv3 PRIVATE
+    RETRO_USE_MOD_LOADER=1
+    RETRO_USING_OPENGL=1
+    RETRO_USE_SDL2=1
+    FORCE_CASE_INSENSITIVE=0
+    RETRO_USE_ORIGINAL_CODE=0
+    RSDK_AUTOBUILD=$<BOOL:${RSDKAIR_RETRO_DISABLE_PLUS}>
+    "RETRO_DEV_EXTRA=\"rsdk-air ${RSDKAIR_VERSION}\""
+    "DECOMP_VERSION=\"1.3.3\"")
+
+find_package(Threads REQUIRED)  # theoraplay decodes on its own thread
+target_link_libraries(rsdkv3 PRIVATE rsdkair_core rsdkair_vorbis rsdkair_theora SDL2::SDL2 Threads::Threads)
+if(ANDROID)
+    target_link_libraries(rsdkv3 PRIVATE android log EGL GLESv1_CM OpenSLES z)
+elseif(APPLE)
+    target_link_libraries(rsdkv3 PRIVATE "-framework OpenGL" "-framework Foundation")
+else()
+    target_link_libraries(rsdkv3 PRIVATE rsdkair_glew)
+endif()
+if(WIN32)
+    target_link_libraries(rsdkv3 PRIVATE winmm comctl32)
+    target_compile_definitions(rsdkv3 PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+
+# Upstream code is not ours to fix: no warnings from it.
+if(MSVC)
+    target_compile_options(rsdkv3 PRIVATE /w /utf-8)
+else()
+    target_compile_options(rsdkv3 PRIVATE -w)
+endif()
