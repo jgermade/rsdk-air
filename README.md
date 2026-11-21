@@ -43,7 +43,7 @@ content. Only for builds you keep for yourself: never distribute them.
 | `src/launcher/` | The `rsdk-air` executable (`libmain.so` on Android), with the cover-mosaic picker (Dear ImGui) |
 | `art/` | Picker covers, with their provenance in `art/README.md`; removable, the picker falls back to neutral art |
 | `assets/fonts/` | Inter (SIL OFL 1.1), the picker's font |
-| `engines/` | Engine modules: `rsdkv3/` (Sonic CD), `rsdkv4/` (Sonic 1, Sonic 2), `rsdkv5/` (Sonic Mania, desktop only for now); `deps/` (ogg, vorbis, theora, GLEW); `dummy/` is test-only |
+| `engines/` | Engine modules: `rsdkv3/` (Sonic CD), `rsdkv4/` (Sonic 1, Sonic 2), `rsdkv5/` (Sonic Mania); `deps/` (ogg, vorbis, theora, GLEW); `dummy/` is test-only |
 | `android/` | Gradle project: `LauncherActivity` + `GameActivity` in a `:game` process |
 | `third_party/` | SDL2, Dear ImGui, stb and the engines, as pinned git submodules |
 | `site/` | Landing page, deployed by `release.yml` |

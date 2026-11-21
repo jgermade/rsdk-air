@@ -30,7 +30,7 @@ android {
                           '-DRSDKAIR_BUILD_TESTS=OFF',
                           "-DRSDKAIR_VERSION=${rsdkairVersion}",
                           "-DRSDKAIR_ENABLE_PLUS=${rsdkairEnablePlus ? 'ON' : 'OFF'}"
-                targets 'rsdk-air', 'SDL2', 'rsdkv3', 'rsdkv4'
+                targets 'rsdk-air', 'SDL2', 'rsdkv3', 'rsdkv4', 'rsdkv5'
             }
         }
         ndk {

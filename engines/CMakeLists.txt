@@ -4,13 +4,7 @@
 
 option(RSDKAIR_ENGINE_RSDKV3 "Build the RSDKv3 module (Sonic CD)" ON)
 option(RSDKAIR_ENGINE_RSDKV4 "Build the RSDKv4 module (Sonic 1, Sonic 2)" ON)
-# Desktop only for now: upstream RSDKv5 on Android needs its own GameActivity setup.
-if(ANDROID)
-    set(rsdkv5_default OFF)
-else()
-    set(rsdkv5_default ON)
-endif()
-option(RSDKAIR_ENGINE_RSDKV5 "Build the RSDKv5U module with Sonic Mania's logic" ${rsdkv5_default})
+option(RSDKAIR_ENGINE_RSDKV5 "Build the RSDKv5U module with Sonic Mania's logic" ON)
 
 add_subdirectory(deps)
 

@@ -4,9 +4,10 @@
 # our own target: upstream makes an executable that loads the game logic as Game.dll /
 # libGame.so; here the logic is linked statically (upstream's GAME_STATIC mode).
 #
-# Subsystem: SDL2 for video, audio and input on desktop. Android is not built yet:
-# upstream only supports its own EGL + GameActivity path there, which does not fit our
-# SDLActivity-based app.
+# Subsystem: SDL2 for video, audio and input everywhere. On Android upstream only supports
+# its own EGL + GameActivity + Paddleboat + Oboe path, which does not fit our
+# SDLActivity-based app, so there the engine is built as its Linux flavour (SDL2 subsystem,
+# plain files in the save folder, no JNI): see the RetroEngine.hpp patch below.
 
 set(UP "${PROJECT_SOURCE_DIR}/third_party/RSDKv5-Decompilation")
 set(MANIA "${PROJECT_SOURCE_DIR}/third_party/Sonic-Mania-Decompilation")
@@ -29,6 +30,21 @@ void RSDK::SKU::InitUserDirectory()]=])
 rsdkair_patch_replace(storage [=[    sprintf_s(buffer, sizeof(buffer), "%s/RSDKv5/", getResourcesPath());]=]
 [=[    sprintf_s(buffer, sizeof(buffer), "%s", rsdkair_rsdkv5_user_dir()); // rsdk-air]=])
 rsdkair_patch_end(storage RSDKV5_USERSTORAGE_CPP)
+
+# RetroEngine.hpp (Android only): pick the Linux platform instead of Android, so the SDL2
+# render, audio and input devices are used and none of upstream's GameActivity/JNI code
+# (androidHelpers.cpp, Java-side file access) is needed. The patched copy shadows the
+# original through an include directory searched first; both share the RETROENGINE_H guard.
+if(ANDROID)
+    rsdkair_patch_begin(engine_hpp "${UP}/RSDKv5/RSDK/Core/RetroEngine.hpp")
+    rsdkair_patch_replace(engine_hpp [=[#elif defined __ANDROID__
+#define RETRO_PLATFORM   (RETRO_ANDROID)]=]
+[=[#elif defined __ANDROID__ && !defined RSDKAIR_ANDROID_AS_LINUX // rsdk-air
+#define RETRO_PLATFORM   (RETRO_ANDROID)]=])
+    rsdkair_patch_end(engine_hpp RSDKV5_ENGINE_HPP)
+    set(RSDKV5_SHADOW_INCLUDE "${CMAKE_CURRENT_BINARY_DIR}/shadow-include")
+    configure_file("${RSDKV5_ENGINE_HPP}" "${RSDKV5_SHADOW_INCLUDE}/RSDK/Core/RetroEngine.hpp" COPYONLY)
+endif()
 
 set(V5 "${UP}/RSDKv5")
 set(RSDKV5_SOURCES
@@ -96,6 +112,10 @@ rsdkair_engine_module(rsdkv5
 # The mod loader needs C++17 (std::filesystem).
 set_target_properties(rsdkv5 PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 
+if(ANDROID)
+    target_include_directories(rsdkv5 BEFORE PRIVATE "${RSDKV5_SHADOW_INCLUDE}")
+    target_compile_definitions(rsdkv5 PRIVATE RSDKAIR_ANDROID_AS_LINUX=1)
+endif()
 target_include_directories(rsdkv5 PRIVATE
     "${V5}"
     "${UP}/dependencies/all"
