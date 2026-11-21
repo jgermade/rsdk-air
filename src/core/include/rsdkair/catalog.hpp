@@ -18,6 +18,7 @@ struct GameSpec {
     std::string_view module;  // engine module, e.g. "rsdkv4" -> engines/rsdkv4.so
     std::span<const std::string_view> required;  // relative to games/<id>/
     Validator validator;
+    int year;                 // original release, shown under the cover in the picker
 };
 
 // All known games, in the order the picker shows them.

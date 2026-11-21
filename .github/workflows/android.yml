@@ -1,0 +1,75 @@
+# Builds the rsdk-air APK.
+#
+# - Called by build.yml (pushes to main, releases) with the release version.
+# - Runs on its own for a push to any other branch whose head commit message contains
+#   "[android]", to try Android changes before they reach main. Only people who can push
+#   to this repository can trigger it; there is no pull_request trigger on purpose.
+#   Such runs build version 0.0.0-dev with Plus off.
+# See ROADMAP/2026-11-20/upstreams-and-licensing.md.
+name: android
+
+on:
+  push:
+    branches-ignore: [main]  # main already builds Android through build.yml
+  workflow_call:
+    inputs:
+      version:
+        description: "Version to embed (X.Y.Z). Empty: 0.0.0-dev."
+        type: string
+        default: ""
+      enable_plus:
+        description: "Plus DLC. Only honoured in private repositories."
+        type: boolean
+        default: false
+      called:
+        description: "Always true when called. github.event_name is the caller's event, so this tells the two cases apart."
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  RSDKAIR_VERSION: ${{ inputs.version != '' && inputs.version || '0.0.0-dev' }}
+  # Same rule as build.yml: Plus only ever in a private repository.
+  RSDKAIR_ENABLE_PLUS: ${{ inputs.enable_plus == true && github.event.repository.private == true && 'ON' || 'OFF' }}
+
+jobs:
+  android:
+    name: android
+    if: inputs.called || contains(github.event.head_commit.message, '[android]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+        with:
+          # The default also asks for "tools", which current sdkmanager no longer has.
+          packages: platform-tools
+
+      - name: Install NDK and CMake
+        run: sdkmanager "ndk;27.2.12479018" "cmake;3.22.1"
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          plus=false
+          [ "$RSDKAIR_ENABLE_PLUS" = "ON" ] && plus=true
+          ./gradlew --no-daemon assembleRelease \
+            -PrsdkairVersion="$RSDKAIR_VERSION" -PrsdkairEnablePlus="$plus"
+          mkdir -p ../dist
+          cp app/build/outputs/apk/release/app-release.apk ../dist/rsdk-air-android.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rsdk-air-android${{ env.RSDKAIR_ENABLE_PLUS == 'ON' && '-plus-private' || '' }}
+          path: dist/rsdk-air-android.apk
+          retention-days: 7
+          if-no-files-found: error

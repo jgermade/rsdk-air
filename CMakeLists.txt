@@ -82,13 +82,22 @@ add_subdirectory(src/core)
 add_subdirectory(src/launcher)
 add_subdirectory(engines)
 
+# The engines this build includes, for the launcher (generated after engines/ has run).
+get_property(rsdkair_engine_modules GLOBAL PROPERTY RSDKAIR_ENGINE_MODULES)
+list(LENGTH rsdkair_engine_modules RSDKAIR_ENGINE_COUNT)
+set(RSDKAIR_ENGINE_LIST "")
+foreach(module IN LISTS rsdkair_engine_modules)
+    string(APPEND RSDKAIR_ENGINE_LIST "\"${module}\", ")
+endforeach()
+configure_file(src/core/engines.hpp.in "${PROJECT_BINARY_DIR}/src/core/generated/rsdkair/engines.hpp" @ONLY)
+
 if(RSDKAIR_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
 
 # ---------------------------------------------------------------------------
-# Install (desktop): <prefix>/rsdk-air, SDL2, engines/, licenses/
+# Install (desktop): <prefix>/rsdk-air, SDL2, engines/, art/, fonts/, licenses/
 # ---------------------------------------------------------------------------
 
 if(NOT ANDROID)
@@ -104,9 +113,20 @@ if(NOT ANDROID)
     install(FILES third_party/sonic3air/LICENSE DESTINATION licenses RENAME sonic3air-GPL-3.0.txt)
     install(FILES third_party/ogg/COPYING DESTINATION licenses RENAME libogg.txt)
     install(FILES third_party/vorbis/COPYING DESTINATION licenses RENAME libvorbis.txt)
+    install(FILES third_party/theora/COPYING DESTINATION licenses RENAME libtheora.txt)
+    install(FILES third_party/RSDKv5-Decompilation/dependencies/all/iniparser/LICENSE DESTINATION licenses RENAME iniparser.txt)
+    install(FILES third_party/RSDKv5-Decompilation/dependencies/all/miniz/LICENSE.md DESTINATION licenses RENAME miniz.md)
+    install(FILES third_party/RSDKv5-Decompilation/dependencies/all/stb_vorbis/LICENSE DESTINATION licenses RENAME stb_vorbis.txt)
+    install(FILES third_party/RSDKv3-Decompilation/dependencies/all/theoraplay/LICENSE.txt DESTINATION licenses RENAME theoraplay.txt)
     install(FILES third_party/glew-cmake/doc/glew.txt DESTINATION licenses RENAME GLEW.txt)
     install(FILES third_party/glew-cmake/doc/mesa.txt DESTINATION licenses RENAME GLEW-mesa.txt)
     install(FILES third_party/glew-cmake/doc/khronos.txt DESTINATION licenses RENAME GLEW-khronos.txt)
     install(FILES third_party/RSDKv4-Decompilation/dependencies/all/tinyxml2/LICENSE.txt DESTINATION licenses RENAME tinyxml2.txt)
-    install(FILES third_party/RSDKv4-Decompilation/dependencies/all/stb-image/LICENSE DESTINATION licenses RENAME stb.txt)
+    install(FILES third_party/stb/LICENSE DESTINATION licenses RENAME stb.txt)
+    install(FILES third_party/imgui/LICENSE.txt DESTINATION licenses RENAME imgui.txt)
+    install(FILES assets/fonts/Inter-LICENSE.txt DESTINATION licenses RENAME Inter-OFL.txt)
+
+    # Picker art (see art/README.md for where each file comes from) and fonts.
+    install(DIRECTORY art/ DESTINATION art)
+    install(DIRECTORY assets/fonts/ DESTINATION fonts)
 endif()

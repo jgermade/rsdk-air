@@ -34,3 +34,15 @@
 	path = third_party/glew-cmake
 	url = https://github.com/Perlmint/glew-cmake.git
 	shallow = true
+[submodule "third_party/imgui"]
+	path = third_party/imgui
+	url = https://github.com/ocornut/imgui.git
+	shallow = true
+[submodule "third_party/stb"]
+	path = third_party/stb
+	url = https://github.com/nothings/stb.git
+	shallow = true
+[submodule "third_party/theora"]
+	path = third_party/theora
+	url = https://github.com/xiph/theora.git
+	shallow = true

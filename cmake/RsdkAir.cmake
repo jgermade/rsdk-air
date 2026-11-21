@@ -20,6 +20,8 @@ endfunction()
 # Android packages and System.loadLibrary expect).
 function(rsdkair_engine_module name)
     add_library(${name} MODULE ${ARGN})
+    # The launcher only offers games whose engine is in this list (src/core engines.hpp).
+    set_property(GLOBAL APPEND PROPERTY RSDKAIR_ENGINE_MODULES ${name})
     target_link_libraries(${name} PRIVATE rsdkair_abi)
     set_target_properties(${name} PROPERTIES
         C_VISIBILITY_PRESET hidden

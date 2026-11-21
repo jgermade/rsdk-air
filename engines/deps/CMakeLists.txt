@@ -1,5 +1,5 @@
-# Libraries the engine modules link statically: libogg, libvorbis and (desktop
-# Windows/Linux) GLEW. Built from the pinned submodules in third_party/, as static PIC
+# Libraries the engine modules link statically: libogg, libvorbis, libtheora (decoder
+# only, for Sonic CD's videos) and (desktop Windows/Linux) GLEW. Built from the pinned submodules in third_party/, as static PIC
 # libraries; each module hides their symbols (cmake/RsdkAir.cmake).
 
 set(RSDKAIR_THIRD_PARTY "${PROJECT_SOURCE_DIR}/third_party")
@@ -42,7 +42,19 @@ if(NOT WIN32)
     target_link_libraries(rsdkair_vorbis PUBLIC m)
 endif()
 
-foreach(lib rsdkair_ogg rsdkair_vorbis)
+# --- libtheora (decoder only, plain C: no assembly) -------------------------------------
+set(THEORA_LIB "${RSDKAIR_THIRD_PARTY}/theora/lib")
+add_library(rsdkair_theora STATIC
+    ${THEORA_LIB}/apiwrapper.c ${THEORA_LIB}/bitpack.c ${THEORA_LIB}/decapiwrapper.c
+    ${THEORA_LIB}/decinfo.c ${THEORA_LIB}/decode.c ${THEORA_LIB}/dequant.c
+    ${THEORA_LIB}/fragment.c ${THEORA_LIB}/huffdec.c ${THEORA_LIB}/idct.c ${THEORA_LIB}/info.c
+    ${THEORA_LIB}/internal.c ${THEORA_LIB}/quant.c ${THEORA_LIB}/state.c)
+target_include_directories(rsdkair_theora
+    PUBLIC "${RSDKAIR_THIRD_PARTY}/theora/include"
+    PRIVATE "${THEORA_LIB}")
+target_link_libraries(rsdkair_theora PUBLIC rsdkair_ogg)
+
+foreach(lib rsdkair_ogg rsdkair_vorbis rsdkair_theora)
     set_target_properties(${lib} PROPERTIES C_VISIBILITY_PRESET hidden POSITION_INDEPENDENT_CODE ON)
     if(MSVC)
         target_compile_options(${lib} PRIVATE /w)

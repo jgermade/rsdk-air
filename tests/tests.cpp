@@ -10,7 +10,9 @@
 #include <rsdkair/process.hpp>
 #include <rsdkair/rom.hpp>
 #include <rsdkair/run_engine.hpp>
+#include <rsdkair/s3air.hpp>
 #include <rsdkair/saves_rsdkv4.hpp>
+#include <rsdkair/sha256.hpp>
 
 #include <cstdio>
 #include <cstdlib>
@@ -150,10 +152,14 @@ void test_rom()
     CHECK(!check_s3k_rom_file(dir / "missing.bin").ok);
 }
 
+// Every engine counts as installed, so the detect test only looks at game data.
+std::string any_engine(std::string_view) { return {}; }
+
 void test_detect()
 {
     const fs::path root = temp_dir("detect");
-    for (const GameStatus &s : detect_games(root)) {
+    for (const GameStatus &s : detect_games(root, any_engine)) {
+        CHECK(s.engine_found);
         CHECK(!s.available);
         CHECK(s.reason.find("missing") != std::string::npos);
     }
@@ -161,7 +167,7 @@ void test_detect()
     write_file(root / "games" / "sonic1" / "Data.rsdk", {1, 2, 3});
     write_file(root / "games" / "s3air" / "Sonic_Knuckles_wSonic3.bin", fake_rom(kS3kRomSize / 2, ""));
 
-    const auto games = detect_games(root);
+    const auto games = detect_games(root, any_engine);
     CHECK(games.size() == catalog().size());
     for (const GameStatus &s : games) {
         if (s.spec->id == "sonic1") {
@@ -176,7 +182,102 @@ void test_detect()
     }
 
     write_file(root / "games" / "s3air" / "Sonic_Knuckles_wSonic3.bin", fake_rom(kS3kRomSize, "GM MK-1563 -00"));
-    CHECK(detect_game(root, *find_game("s3air")).available);
+    CHECK(detect_game(root, *find_game("s3air"), any_engine).available);
+}
+
+void test_detect_engines()
+{
+    // Data present for two games, but only rsdkv4 is installed.
+    const fs::path root = temp_dir("detect-engines");
+    write_file(root / "games" / "sonic1" / "Data.rsdk", {1, 2, 3});
+    write_file(root / "games" / "soniccd" / "Data.rsdk", {1, 2, 3});
+    const EngineProbe only_rsdkv4 = [](std::string_view module) {
+        return module == "rsdkv4" ? std::string() : "no " + std::string(module);
+    };
+
+    const GameStatus s1 = detect_game(root, *find_game("sonic1"), only_rsdkv4);
+    CHECK(s1.available && s1.engine_found && s1.reason.empty());
+
+    const GameStatus cd = detect_game(root, *find_game("soniccd"), only_rsdkv4);
+    CHECK(!cd.available && !cd.engine_found && cd.reason == "no rsdkv3");
+
+    // Without an engine, the engine is the reason even when the data is missing too.
+    const GameStatus mania = detect_game(root, *find_game("mania"), only_rsdkv4);
+    CHECK(!mania.available && !mania.engine_found && mania.reason == "no rsdkv5");
+
+    // The default probe: only modules this build includes, and only if the file exists.
+    CHECK(probe_engine("no-such-engine").find("does not include the no-such-engine engine") != std::string::npos);
+#if defined(RSDKAIR_RSDKV4_MODULE)
+    CHECK(probe_engine("rsdkv4").empty());
+#endif
+}
+
+void test_sha256()
+{
+    CHECK(Sha256().hex() == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    Sha256 abc;
+    abc.update("abc", 3);
+    CHECK(abc.hex() == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+
+    // Several blocks, fed in uneven pieces, and from a file.
+    const std::string text(1000, 'a');
+    Sha256 pieces;
+    pieces.update(text.data(), 7);
+    pieces.update(text.data() + 7, 993);
+    const std::string expected = "41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3";
+    CHECK(pieces.hex() == expected);
+    const fs::path dir = temp_dir("sha256");
+    write_file(dir / "a.bin", std::vector<std::uint8_t>(text.begin(), text.end()));
+    CHECK(sha256_file(dir / "a.bin") == expected);
+    CHECK(sha256_file(dir / "missing.bin").empty());
+}
+
+void test_s3air()
+{
+    const std::string config = "{\n\t// comment with \"RomPath\" mentioned\n\t\"WindowSize\": \"1200 x 672\"\n}\n";
+    const std::string once = s3air_set_rom_path(config, fs::path("/data/games/s3air/rom.bin"));
+    CHECK(once.find("\"RomPath\": \"/data/games/s3air/rom.bin\",") != std::string::npos);
+    CHECK(once.find("WindowSize") != std::string::npos);
+    CHECK(once.find("{") < once.find("RomPath"));
+    // Set again: still exactly one RomPath line, the new one.
+    const std::string twice = s3air_set_rom_path(once, fs::path("/other/rom.bin"));
+    CHECK(twice.find("/other/rom.bin") != std::string::npos);
+    CHECK(twice.find("/data/games") == std::string::npos);
+    CHECK(twice.find("RomPath") == twice.rfind("RomPath"));
+    // Backslashes (Windows paths) are escaped for JSON.
+    CHECK(s3air_set_rom_path("{}", fs::path("C:\\Games\\rom.bin")).find("C:\\\\Games") != std::string::npos);
+
+    const fs::path root = temp_dir("s3air");
+    if (const S3airPackage *package = s3air_package()) {
+        CHECK(package->sha256.size() == 64);
+        CHECK(package->url.rfind("https://github.com/Eukaryot/sonic3air/releases/download/", 0) == 0);
+        CHECK(s3air_install_dir(root) == root / "apps" / "sonic3air" / std::string(package->version));
+        CHECK(!s3air_installed(root));
+        write_file(s3air_executable(root), {1});
+        CHECK(s3air_installed(root));
+    }
+#if defined(__linux__) && defined(__x86_64__)
+    CHECK(s3air_package() != nullptr);
+#endif
+
+    // Launch preparation on a fake install: RomPath points at the player's ROM, and
+    // audioremaster.bin shows up in the game's data folder.
+    if (const S3airPackage *package = s3air_package(); package && !package->config.empty()) {
+        const fs::path install = s3air_install_dir(root);
+        write_file(install / std::string(package->config), {'{', '\n', '}', '\n'});
+        fs::create_directories(install / std::string(package->data));
+        write_file(root / "games" / "s3air" / "Sonic_Knuckles_wSonic3.bin", {1, 2, 3});
+        write_file(root / "games" / "s3air" / "audioremaster.bin", {4, 5, 6, 7});
+        std::string error;
+        CHECK(s3air_prepare_launch(root, error));
+        const std::string config = read_file(install / std::string(package->config));
+        CHECK(config.find("Sonic_Knuckles_wSonic3.bin") != std::string::npos);
+        CHECK(config.find("RomPath") == config.rfind("RomPath"));
+        CHECK(fs::file_size(install / std::string(package->data) / "audioremaster.bin") == 4);
+        CHECK(s3air_prepare_launch(root, error));  // again: still one RomPath, no error
+        CHECK(read_file(install / std::string(package->config)).find("RomPath") ==
+              read_file(install / std::string(package->config)).rfind("RomPath"));
+    }
 }
 
 void test_windows_quoting()
@@ -399,6 +500,9 @@ int main(int argc, char **argv)
         {"cli", test_cli},
         {"rom", test_rom},
         {"detect", test_detect},
+        {"detect_engines", test_detect_engines},
+        {"sha256", test_sha256},
+        {"s3air", test_s3air},
         {"windows_quoting", test_windows_quoting},
         {"module_hidden_symbols", test_module_hidden_symbols},
         {"run_engine", test_run_engine},

@@ -1,6 +1,7 @@
 // See rsdkv4_bridge.hpp. Mirrors Debug.cpp move for move: the same globals, the same
 // saveRAM layout, the same InitStartingStage() calls, so a game started here lands in
-// exactly the state the engine's own menu would produce.
+// exactly the state the engine's own menu would produce. Two differences, both marked
+// below: no-save mode leaves saveRAM alone, and a new game skips the title screen.
 #include "rsdkv4_bridge.hpp"
 
 #include "RetroEngine.hpp"
@@ -101,9 +102,11 @@ void start_game(int slot, int player)
     if (saving)
         WriteSaveRAMData();
 
-    // Presentation/0 is the title screen: the engine's own new-game path goes through it,
-    // and its script walks on into zone 1.
-    InitStartingStage(STAGELIST_PRESENTATION, 0, player);
+    // Straight into zone 1, as the engine's own StartingSaveFile path does
+    // (RetroEngine.cpp, startSave). The start menu goes through Presentation/0 (the title
+    // screen) instead, which a player who already picked a slot does not want to see again.
+    SetGlobalVariableByName("specialStage.nextZone", 0);
+    InitStartingStage(STAGELIST_REGULAR, 0, player);
 }
 
 } // namespace rsdkv4_bridge
