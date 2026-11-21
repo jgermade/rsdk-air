@@ -259,12 +259,14 @@ struct Picker::Impl {
 
     struct Layout {
         float u = 1.0f;
-        float tile = 0.0f;
+        float tile = 0.0f;    // cover width
+        float tile_h = 0.0f;  // cover height (kCoverAspect taller)
         std::vector<ImVec2> min, max;  // cover rectangle per game
         ImVec2 panel_min, panel_max;   // area for the details panel
     };
 
-    static constexpr float kCaption = 52.0f;  // title + year under a cover, at u = 1
+    static constexpr float kCaption = 52.0f;
+    static constexpr float kCoverAspect = 1.25f;  // height / width: 4:5, a little taller than wide, like a box  // title + year under a cover, at u = 1
 
     // Scale of the whole layout: 1.0 at 1280x720.
     float ui() const
@@ -289,18 +291,20 @@ struct Picker::Impl {
         // Leave room below for the panel (about 190 px) and the hints.
         const int rows = (count + cols - 1) / cols;
         const float room = size.y - top - 64.0f * u - 200.0f * u;
-        const float by_height = (room - static_cast<float>(rows) * (kCaption * u + gap)) / static_cast<float>(rows);
-        l.tile = std::max(64.0f * u, std::min({tile_for(cols), by_height, 260.0f * u}));
+        const float by_height =
+            (room - static_cast<float>(rows) * (kCaption * u + gap)) / static_cast<float>(rows) / kCoverAspect;
+        l.tile = std::max(64.0f * u, std::min({tile_for(cols), by_height, 240.0f * u}));
+        l.tile_h = l.tile * kCoverAspect;
         // Centre covers + panel (about 160 px) vertically in the space between header and hints.
-        const float block = static_cast<float>(rows) * (l.tile + kCaption * u + gap) - gap + 22.0f * u + 160.0f * u;
+        const float block = static_cast<float>(rows) * (l.tile_h + kCaption * u + gap) - gap + 22.0f * u + 160.0f * u;
         top = std::max(top, top + (size.y - 64.0f * u - top - block) / 2);
         for (int i = 0; i < count; ++i) {
             const float x = left + static_cast<float>(i % cols) * (l.tile + gap);
-            const float y = top + static_cast<float>(i / cols) * (l.tile + kCaption * u + gap);
+            const float y = top + static_cast<float>(i / cols) * (l.tile_h + kCaption * u + gap);
             l.min.emplace_back(x, y);
-            l.max.emplace_back(x + l.tile, y + l.tile);
+            l.max.emplace_back(x + l.tile, y + l.tile_h);
         }
-        const float grid_bottom = top + static_cast<float>(rows) * (l.tile + kCaption * u + gap) - gap;
+        const float grid_bottom = top + static_cast<float>(rows) * (l.tile_h + kCaption * u + gap) - gap;
         l.panel_min = ImVec2(left, grid_bottom + 22.0f * u);
         l.panel_max = ImVec2(size.x - left, size.y - 62.0f * u);
         return l;
@@ -448,7 +452,20 @@ struct Picker::Impl {
 
         const Cover &cover = covers[static_cast<std::size_t>(index)];
         if (cover.art) {
-            dl->AddImageRounded(texture_ref(cover.art), min, max, ImVec2(0, 0), ImVec2(1, 1), IM_COL32_WHITE, round);
+            int tw = 1, th = 1;
+            SDL_QueryTexture(cover.art, nullptr, nullptr, &tw, &th);
+            // Cover-fit: trim whichever sides the tile's aspect does not show.
+            const float tile_aspect = (max.x - min.x) / (max.y - min.y);
+            const float art_aspect = static_cast<float>(tw) / static_cast<float>(std::max(1, th));
+            ImVec2 uv0(0, 0), uv1(1, 1);
+            if (art_aspect > tile_aspect) {
+                const float k = tile_aspect / art_aspect;
+                uv0.x = (1 - k) / 2, uv1.x = (1 + k) / 2;
+            } else {
+                const float k = art_aspect / tile_aspect;
+                uv0.y = (1 - k) / 2, uv1.y = (1 + k) / 2;
+            }
+            dl->AddImageRounded(texture_ref(cover.art), min, max, uv0, uv1, IM_COL32_WHITE, round);
         } else {
             // Neutral fallback: a plain card with the title.
             dl->AddRectFilled(min, max, rgba(44, 46, 70), round);
