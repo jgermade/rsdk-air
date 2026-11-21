@@ -97,7 +97,7 @@ if(RSDKAIR_BUILD_TESTS)
 endif()
 
 # ---------------------------------------------------------------------------
-# Install (desktop): <prefix>/rsdk-air, SDL2, engines/, licenses/
+# Install (desktop): <prefix>/rsdk-air, SDL2, engines/, art/, fonts/, licenses/
 # ---------------------------------------------------------------------------
 
 if(NOT ANDROID)
@@ -117,5 +117,11 @@ if(NOT ANDROID)
     install(FILES third_party/glew-cmake/doc/mesa.txt DESTINATION licenses RENAME GLEW-mesa.txt)
     install(FILES third_party/glew-cmake/doc/khronos.txt DESTINATION licenses RENAME GLEW-khronos.txt)
     install(FILES third_party/RSDKv4-Decompilation/dependencies/all/tinyxml2/LICENSE.txt DESTINATION licenses RENAME tinyxml2.txt)
-    install(FILES third_party/RSDKv4-Decompilation/dependencies/all/stb-image/LICENSE DESTINATION licenses RENAME stb.txt)
+    install(FILES third_party/stb/LICENSE DESTINATION licenses RENAME stb.txt)
+    install(FILES third_party/imgui/LICENSE.txt DESTINATION licenses RENAME imgui.txt)
+    install(FILES assets/fonts/Inter-LICENSE.txt DESTINATION licenses RENAME Inter-OFL.txt)
+
+    # Picker art (see art/README.md for where each file comes from) and fonts.
+    install(DIRECTORY art/ DESTINATION art)
+    install(DIRECTORY assets/fonts/ DESTINATION fonts)
 endif()

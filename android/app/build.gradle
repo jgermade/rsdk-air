@@ -49,6 +49,8 @@ android {
         main {
             // SDL's Java side (SDLActivity and friends), used as is from the submodule.
             java.srcDirs += '../../third_party/SDL/android-project/app/src/main/java'
+            // The picker's art/ and fonts/, staged by copyPickerAssets below.
+            assets.srcDirs += layout.buildDirectory.dir('generated/picker-assets')
         }
     }
 
@@ -71,3 +73,12 @@ android {
         abortOnError false
     }
 }
+
+// The picker reads art/covers/*.jpg and fonts/*.ttf from the APK's assets, the same relative
+// paths it uses next to the desktop executable.
+def copyPickerAssets = tasks.register('copyPickerAssets', Sync) {
+    from('../../art') { into 'art' }
+    from('../../assets/fonts') { into 'fonts' }
+    into layout.buildDirectory.dir('generated/picker-assets')
+}
+tasks.named('preBuild') { dependsOn copyPickerAssets }

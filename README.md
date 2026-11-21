@@ -40,10 +40,12 @@ content. Only for builds you keep for yourself: never distribute them.
 | --- | --- |
 | `include/rsdkair/engine.h` | The C ABI every engine module exports |
 | `src/core/` | Launcher logic without SDL: game catalog, data detection, ROM checks, module loading, child processes |
-| `src/launcher/` | The `rsdk-air` executable (`libmain.so` on Android) |
+| `src/launcher/` | The `rsdk-air` executable (`libmain.so` on Android), with the cover-mosaic picker (Dear ImGui) |
+| `art/` | Picker covers, with their provenance in `art/README.md`; removable, the picker falls back to neutral art |
+| `assets/fonts/` | Inter (SIL OFL 1.1), the picker's font |
 | `engines/` | Engine modules: `rsdkv4/` (Sonic 1, Sonic 2); `deps/` (ogg, vorbis, GLEW); `dummy/` is test-only |
 | `android/` | Gradle project: `LauncherActivity` + `GameActivity` in a `:game` process |
-| `third_party/` | SDL2 and the engines, as pinned git submodules |
+| `third_party/` | SDL2, Dear ImGui, stb and the engines, as pinned git submodules |
 | `site/` | Landing page, deployed by `release.yml` |
 | `.github/workflows/` | `build.yml` (push to main, or manual), `android.yml` (called by `build.yml`, or a push with `[android]` in the commit message) and `release.yml` (manual) |
 

@@ -1,0 +1,27 @@
+# art/
+
+Images the launcher shows. Everything here can be deleted in one go: the code never
+requires these files and falls back to neutral art when one is missing. See the art
+decision in [`ROADMAP/2026-11-20/game-menus.md`](../ROADMAP/2026-11-20/game-menus.md).
+
+Not affiliated with or endorsed by SEGA. Sonic the Hedgehog and its characters are
+trademarks of SEGA.
+
+## covers/
+
+One square cover per game, `covers/<game id>.jpg`, shown in the picker's mosaic and,
+blurred, as its backdrop. A game whose tile spans two columns (Sonic Mania, under the 2x2
+of the other four) uses `covers/<game id>-wide.jpg` when it exists (2:1, e.g. 2048x1024;
+keep the bottom-left corner calm, the title is drawn there), otherwise the middle of the
+square cover.
+
+| File | Source | Changes |
+| --- | --- | --- |
+| `covers/sonic1.jpg` | play.germade (`/assets/covers/sonic_cover.jpg`) | 1024 to 512 px, JPEG q88 |
+| `covers/sonic2.jpg` | play.germade (`/assets/covers/sonic2_cover.jpg`) | 1024 to 512 px, JPEG q88 |
+| `covers/soniccd.jpg` | play.germade (`/assets/covers/soniccd_cover.jpg`) | 1024 to 512 px, JPEG q88 |
+| `covers/s3air.jpg` | play.germade (`/assets/covers/sonic3air_cover.jpg`) | 1024 to 512 px, JPEG q88 |
+| `covers/mania.jpg` | play.germade (`/assets/covers/sonicmania_cover.jpg`) | 1024 to 512 px, JPEG q88 |
+
+The play.germade covers were made by the project owner with an image generator (Gemini),
+in the style of the games; they are fan art, not SEGA's box art.

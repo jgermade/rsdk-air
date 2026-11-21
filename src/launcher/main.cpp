@@ -6,7 +6,10 @@
 //   ":game" process on Android).
 // - game process (--game <id>): loads that game's engine module and runs it.
 //
-// The picker is a plain SDL message box for now; M2 replaces it with a Dear ImGui UI.
+// The picker is a mosaic of game covers (picker.cpp, Dear ImGui). If no window can be
+// opened it falls back to a plain SDL message box with one button per game.
+
+#include "picker.hpp"
 
 #include <rsdkair/catalog.hpp>
 #include <rsdkair/cli.hpp>
@@ -147,13 +150,9 @@ bool start_game_process(const GameSpec &game, const fs::path &root, std::string 
 }
 #endif
 
-int run_picker(const fs::path &root)
+// Fallback picker for when the cover mosaic cannot open a window.
+int run_message_box_picker(const fs::path &root)
 {
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
-        std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
-        return 1;
-    }
-
     for (;;) {
         const std::vector<GameStatus> games = detect_games(root);
         std::vector<const GameStatus *> available;
@@ -214,8 +213,41 @@ int run_picker(const fs::path &root)
             show_error(std::string(game.title), error);
         }
     }
+    return kExitOk;
+}
 
-    SDL_Quit();
+int run_picker(const fs::path &root)
+{
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMECONTROLLER) != 0) {
+        std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+        return 1;
+    }
+    struct SdlQuit {
+        ~SdlQuit() { SDL_Quit(); }
+    } sdl_quit;  // declared before the picker, so it runs after the picker is destroyed
+
+    Picker picker;
+    std::string error;
+    if (!picker.open(error)) {
+        std::fprintf(stderr, "%s; using the simple picker\n", error.c_str());
+        return run_message_box_picker(root);
+    }
+
+    for (;;) {
+        const std::vector<GameStatus> games = detect_games(root);  // again after each game
+        const int choice = picker.choose(games);
+        if (choice < 0)
+            break;
+        const GameSpec &game = *games[static_cast<std::size_t>(choice)].spec;
+        picker.suspend();
+        const bool started = start_game_process(game, root, error);
+        picker.resume();
+        if (!started) {
+            if (error.empty())
+                break;  // the app is quitting
+            show_error(std::string(game.title), error);
+        }
+    }
     return kExitOk;
 }
 
