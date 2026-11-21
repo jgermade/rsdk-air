@@ -143,7 +143,6 @@ std::vector<unsigned char> blurred(const unsigned char *src, int w, int h, int s
 
 struct Cover {
     SDL_Texture *art = nullptr;   // <id>.jpg, square
-    SDL_Texture *wide = nullptr;  // <id>-wide.jpg, optional, for a tile spanning two columns
     SDL_Texture *glow = nullptr;  // blurred art, for the backdrop
 };
 
@@ -196,8 +195,6 @@ struct Picker::Impl {
         for (Cover &c : covers) {
             if (c.art)
                 SDL_DestroyTexture(c.art);
-            if (c.wide)
-                SDL_DestroyTexture(c.wide);
             if (c.glow)
                 SDL_DestroyTexture(c.glow);
         }
@@ -249,7 +246,6 @@ struct Picker::Impl {
             const std::string base = resources + "art/covers/" + std::string(catalog()[i].id);
             std::vector<unsigned char> glow;
             covers[i].art = load_texture(base + ".jpg", &glow);
-            covers[i].wide = load_texture(base + "-wide.jpg", nullptr);
             if (!glow.empty())
                 covers[i].glow = make_texture(renderer, glow.data(), kGlowSize, kGlowSize);
         }
@@ -257,17 +253,18 @@ struct Picker::Impl {
 
     // Layout ---------------------------------------------------------------------------
     //
-    // Covers in two columns on the left, the details panel on the right. With an odd
-    // number of games the last one spans both columns (Sonic Mania under the 2x2 of
-    // Sonic 1, 2, CD and 3), using a wide cover when there is one.
+    // All covers in one row, square, with the title and year under each one; the details
+    // panel below the row. If the window is too narrow for one row (a phone held upright),
+    // the covers wrap onto more rows.
 
     struct Layout {
         float u = 1.0f;
         float tile = 0.0f;
-        float gap = 0.0f;
-        std::vector<ImVec2> min, max;  // per game
+        std::vector<ImVec2> min, max;  // cover rectangle per game
         ImVec2 panel_min, panel_max;   // area for the details panel
     };
+
+    static constexpr float kCaption = 52.0f;  // title + year under a cover, at u = 1
 
     // Scale of the whole layout: 1.0 at 1280x720.
     float ui() const
@@ -276,34 +273,40 @@ struct Picker::Impl {
         return std::clamp(std::min(size.x / 1280.0f, size.y / 720.0f), 0.5f, 2.5f);
     }
 
-    static bool wide(int index, int count) { return count % 2 == 1 && index == count - 1; }
-
     Layout layout(int count) const
     {
         Layout l;
         const ImVec2 size = ImGui::GetIO().DisplaySize;
         const float u = l.u = ui();
-        l.gap = 18.0f * u;
-        const float left = kMargin * u, top = 92.0f * u, bottom = size.y - 64.0f * u;
-        const int rows = (count + 1) / 2;
-        const float by_height = (bottom - top - static_cast<float>(rows - 1) * l.gap) / static_cast<float>(rows);
-        const float by_width = (size.x * 0.52f - left - l.gap) / 2;
-        l.tile = std::max(48.0f * u, std::min(by_height, by_width));
+        const float gap = 40.0f * u;  // generous: the covers are busy pictures
+        const float left = kMargin * u;
+        float top = 96.0f * u;
+        const float width = size.x - 2 * left;
+        int cols = std::max(1, count);
+        auto tile_for = [&](int c) { return (width - static_cast<float>(c - 1) * gap) / static_cast<float>(c); };
+        while (cols > 1 && tile_for(cols) < 130.0f * u)
+            --cols;
+        // Leave room below for the panel (about 190 px) and the hints.
+        const int rows = (count + cols - 1) / cols;
+        const float room = size.y - top - 64.0f * u - 200.0f * u;
+        const float by_height = (room - static_cast<float>(rows) * (kCaption * u + gap)) / static_cast<float>(rows);
+        l.tile = std::max(64.0f * u, std::min({tile_for(cols), by_height, 260.0f * u}));
+        // Centre covers + panel (about 160 px) vertically in the space between header and hints.
+        const float block = static_cast<float>(rows) * (l.tile + kCaption * u + gap) - gap + 22.0f * u + 160.0f * u;
+        top = std::max(top, top + (size.y - 64.0f * u - top - block) / 2);
         for (int i = 0; i < count; ++i) {
-            const float x = left + static_cast<float>(i % 2) * (l.tile + l.gap);
-            const float y = top + static_cast<float>(i / 2) * (l.tile + l.gap);
-            const float w = wide(i, count) ? 2 * l.tile + l.gap : l.tile;
-            l.min.emplace_back(wide(i, count) ? left : x, y);
-            l.max.emplace_back(l.min.back().x + w, y + l.tile);
+            const float x = left + static_cast<float>(i % cols) * (l.tile + gap);
+            const float y = top + static_cast<float>(i / cols) * (l.tile + kCaption * u + gap);
+            l.min.emplace_back(x, y);
+            l.max.emplace_back(x + l.tile, y + l.tile);
         }
-        l.panel_min = ImVec2(left + 2 * l.tile + l.gap + 46.0f * u, top);
-        l.panel_max = ImVec2(size.x - left, bottom);
+        const float grid_bottom = top + static_cast<float>(rows) * (l.tile + kCaption * u + gap) - gap;
+        l.panel_min = ImVec2(left, grid_bottom + 22.0f * u);
+        l.panel_max = ImVec2(size.x - left, size.y - 62.0f * u);
         return l;
     }
 
     // Grid helpers -------------------------------------------------------------------
-
-    int last_narrow = 0;  // where Up from the wide tile goes back to
 
     void move_focus(Action action, int count)
     {
@@ -329,9 +332,7 @@ struct Picker::Impl {
             }
             if (along <= 1.0f)
                 continue;
-            float score = along + 2.0f * across;
-            if (i == last_narrow)
-                score -= 1.0f;  // break ties (e.g. Up from the wide tile) towards where we came from
+            const float score = along + 2.0f * across;
             if (score < best_score) {
                 best_score = score;
                 best = i;
@@ -343,16 +344,15 @@ struct Picker::Impl {
 
     void set_focus(int index, int count)
     {
+        (void)count;
         focus = index;
-        if (!wide(index, count))
-            last_narrow = index;
     }
 
     int tile_at(ImVec2 p, int count) const
     {
         const Layout l = layout(count);
-        for (int i = 0; i < count; ++i) {
-            if (p.x >= l.min[i].x && p.x < l.max[i].x && p.y >= l.min[i].y && p.y < l.max[i].y)
+        for (int i = 0; i < count; ++i) {  // the cover and its caption
+            if (p.x >= l.min[i].x && p.x < l.max[i].x && p.y >= l.min[i].y && p.y < l.max[i].y + kCaption * l.u)
                 return i;
         }
         return -1;
@@ -430,12 +430,11 @@ struct Picker::Impl {
     void draw_tile(ImDrawList *dl, const Layout &l, const GameStatus &game, int index, float dt)
     {
         const float u = l.u;
-        const int count = static_cast<int>(l.min.size());
         const bool focused = index == focus;
         float &lf = lift[static_cast<std::size_t>(index)];
         lf = approach(lf, focused ? 1.0f : 0.0f, dt);
 
-        const float grow = 6.0f * u * lf;
+        const float grow = 7.0f * u * lf;
         const ImVec2 min(l.min[index].x - grow, l.min[index].y - grow);
         const ImVec2 max(l.max[index].x + grow, l.max[index].y + grow);
         const float round = kRounding * u;
@@ -447,45 +446,16 @@ struct Picker::Impl {
                               rgba(0, 0, 0, static_cast<int>(12 + 10 * lf)), round + sp);
         }
 
-        // Cover: the wide one if the tile is wide and there is one, else the square cover
-        // (cropped to the middle for a wide tile).
         const Cover &cover = covers[static_cast<std::size_t>(index)];
-        SDL_Texture *art = cover.art;
-        ImVec2 uv0(0, 0), uv1(1, 1);
-        const float aspect = (max.x - min.x) / (max.y - min.y);
-        if (wide(index, count) && cover.wide) {
-            art = cover.wide;
-            int w = 0, h = 0;
-            SDL_QueryTexture(art, nullptr, nullptr, &w, &h);
-            const float tex_aspect = static_cast<float>(w) / static_cast<float>(std::max(1, h));
-            if (tex_aspect > aspect) {
-                const float k = aspect / tex_aspect;
-                uv0.x = (1 - k) / 2, uv1.x = (1 + k) / 2;
-            } else {
-                const float k = tex_aspect / aspect;
-                uv0.y = (1 - k) / 2, uv1.y = (1 + k) / 2;
-            }
-        } else if (aspect > 1.01f) {
-            const float k = 1.0f / aspect;
-            uv0.y = 0.42f - k / 2, uv1.y = 0.42f + k / 2;  // a bit above the middle: faces
-        }
-        if (art) {
-            dl->AddImageRounded(texture_ref(art), min, max, uv0, uv1, IM_COL32_WHITE, round);
+        if (cover.art) {
+            dl->AddImageRounded(texture_ref(cover.art), min, max, ImVec2(0, 0), ImVec2(1, 1), IM_COL32_WHITE, round);
         } else {
-            dl->AddRectFilled(min, max, rgba(44, 46, 70), round);  // neutral fallback
+            // Neutral fallback: a plain card with the title.
+            dl->AddRectFilled(min, max, rgba(44, 46, 70), round);
+            const std::string title(game.spec->title);
+            text(dl, font_bold, 18.0f * u, ImVec2(min.x + 14.0f * u, min.y + 14.0f * u), rgba(240, 240, 250), title,
+                 max.x - min.x - 28.0f * u);
         }
-
-        // Title and year on a dark gradient at the bottom of the cover.
-        const float shade_h = std::min(78.0f * u, (max.y - min.y) * 0.55f);
-        dl->AddRectFilledMultiColor(ImVec2(min.x, max.y - shade_h), ImVec2(max.x, max.y - round), rgba(0, 0, 0, 0),
-                                    rgba(0, 0, 0, 0), rgba(0, 0, 0, 170), rgba(0, 0, 0, 170));
-        dl->AddRectFilled(ImVec2(min.x, max.y - round), max, rgba(0, 0, 0, 170), round, ImDrawFlags_RoundBottom);
-        const std::string title(game.spec->title);
-        const float pad = 14.0f * u;
-        text(dl, font_bold, 16.0f * u, ImVec2(min.x + pad, max.y - pad - 36.0f * u), IM_COL32_WHITE, title);
-        text(dl, font_regular, 13.0f * u, ImVec2(min.x + pad, max.y - pad - 16.0f * u), rgba(205, 205, 215),
-             std::to_string(game.spec->year));
-
         if (!game.available) {
             dl->AddRectFilled(min, max, rgba(8, 8, 14, focused ? 80 : 120), round);
             draw_lock(dl, ImVec2(max.x, min.y), u);
@@ -495,6 +465,16 @@ struct Picker::Impl {
             dl->AddRect(ImVec2(min.x - ring, min.y - ring), ImVec2(max.x + ring, max.y + ring),
                         with_alpha(IM_COL32_WHITE, 0.4f + 0.6f * lf), round + ring, 3.0f * u);
         }
+
+        // Title and year under the cover.
+        const float ty = l.max[index].y + 12.0f * u + grow;
+        const std::string title(game.spec->title);
+        const float title_w = measure(font_bold, 15.0f * u, title).x;
+        const float title_size = title_w > l.tile ? 15.0f * u * l.tile / title_w : 15.0f * u;  // narrow tiles
+        text(dl, focused ? font_bold : font_regular, title_size, ImVec2(l.min[index].x + 2.0f * u, ty),
+             focused ? IM_COL32_WHITE : rgba(196, 196, 208), title);
+        text(dl, font_regular, 12.5f * u, ImVec2(l.min[index].x + 2.0f * u, ty + 20.0f * u), rgba(140, 140, 155),
+             std::to_string(game.spec->year));
     }
 
     std::string status_line(const GameStatus &game, std::string &chip, ImU32 &chip_col) const
@@ -521,63 +501,58 @@ struct Picker::Impl {
     void draw_details(ImDrawList *dl, const Layout &l, const GameStatus &game, ImVec2 &play_min, ImVec2 &play_max)
     {
         const float u = l.u;
-        const float pad = 30.0f * u;
-        const float width = l.panel_max.x - l.panel_min.x;
-        if (width < 200.0f * u)
+        const ImVec2 min = l.panel_min;
+        const float pad = 28.0f * u;
+        const float width = l.panel_max.x - min.x;
+        const float right_w = std::min(300.0f * u, width * 0.36f);
+        const float text_w = width - right_w - 3 * pad;
+        if (text_w < 120.0f * u)
             return;
-        const float text_w = width - 2 * pad;
 
         const std::string engine = engine_label(game.spec->module);
         const std::string title(game.spec->title);
         std::string chip;
         ImU32 chip_col = 0;
         const std::string line = status_line(game, chip, chip_col);
-
-        // Measure first, then size the panel to its content.
-        const float title_size = std::min(44.0f * u, text_w / std::max(6.0f, static_cast<float>(title.size()) * 0.55f));
+        const float title_size = std::min(40.0f * u, l.panel_max.y - min.y > 150.0f * u ? 40.0f * u : 30.0f * u);
         const float title_h = measure(font_bold, title_size, title, text_w).y;
-        const float line_h = measure(font_regular, 17.0f * u, line, text_w).y;
-        const float height = pad + 18.0f * u + 10.0f * u + title_h + 12.0f * u + line_h + 24.0f * u + 30.0f * u +
-                             22.0f * u + 52.0f * u + pad;
-
-        // Vertically centred on the focused cover, kept inside the panel area.
-        const float fy = (l.min[focus].y + l.max[focus].y) / 2;
-        float top = std::clamp(fy - height / 2, l.panel_min.y, std::max(l.panel_min.y, l.panel_max.y - height));
-        const ImVec2 min(l.panel_min.x, top), max(l.panel_max.x, top + height);
+        const float line_h = measure(font_regular, 16.0f * u, line, text_w).y;
+        const float height = std::max(pad + 28.0f * u + title_h + 8.0f * u + line_h + pad, 2 * pad + 30.0f * u + 18.0f * u + 52.0f * u);
+        const ImVec2 max(l.panel_max.x, std::min(min.y + height, l.panel_max.y));
         const ImU32 bg = rgba(24, 23, 33, 235);
 
-        // Caret pointing at the focused cover.
-        const float cy = std::clamp(fy, min.y + 30.0f * u, max.y - 30.0f * u);
-        dl->AddTriangleFilled(ImVec2(min.x + 1, cy - 12.0f * u), ImVec2(min.x + 1, cy + 12.0f * u),
-                              ImVec2(min.x - 12.0f * u, cy), bg);
-        dl->AddRectFilled(min, max, bg, 24.0f * u);
-        dl->AddRect(min, max, rgba(255, 255, 255, 22), 24.0f * u, 1.0f * u);
+        // Caret pointing up at the focused cover.
+        const float cx = (l.min[focus].x + l.max[focus].x) / 2;
+        dl->AddTriangleFilled(ImVec2(cx - 12.0f * u, min.y + 1), ImVec2(cx + 12.0f * u, min.y + 1),
+                              ImVec2(cx, min.y - 12.0f * u), bg);
+        dl->AddRectFilled(min, max, bg, 22.0f * u);
+        dl->AddRect(min, max, rgba(255, 255, 255, 22), 22.0f * u, 1.0f * u);
 
+        // Left: engine label, title, status line.
         float y = min.y + pad;
-        dl->AddCircleFilled(ImVec2(min.x + pad + 4.0f * u, y + 8.0f * u), 4.0f * u, rgba(236, 72, 153));
-        text(dl, font_bold, 13.0f * u, ImVec2(min.x + pad + 16.0f * u, y), rgba(190, 190, 205), engine);
-        y += 18.0f * u + 10.0f * u;
+        dl->AddCircleFilled(ImVec2(min.x + pad + 4.0f * u, y + 7.0f * u), 4.0f * u, rgba(236, 72, 153));
+        text(dl, font_bold, 12.5f * u, ImVec2(min.x + pad + 16.0f * u, y), rgba(190, 190, 205), engine);
+        y += 28.0f * u;
         text(dl, font_bold, title_size, ImVec2(min.x + pad, y), IM_COL32_WHITE, title, text_w);
-        y += title_h + 12.0f * u;
-        text(dl, font_regular, 17.0f * u, ImVec2(min.x + pad, y), rgba(200, 200, 212), line, min.x + pad + text_w);
-        y += line_h + 24.0f * u;
+        y += title_h + 8.0f * u;
+        text(dl, font_regular, 16.0f * u, ImVec2(min.x + pad, y), rgba(200, 200, 212), line, min.x + pad + text_w);
 
-        // Chips: year, status.
-        float x = min.x + pad;
+        // Right: chips (year, status) and the Play button.
+        const float rx = max.x - pad - right_w;
+        float x = rx;
+        y = min.y + pad;
         auto pill = [&](const std::string &label, ImU32 fg, ImU32 border) {
-            const ImVec2 ts = measure(font_regular, 13.5f * u, label);
-            const ImVec2 pmin(x, y), pmax(x + ts.x + 26.0f * u, y + 30.0f * u);
+            const ImVec2 ts = measure(font_regular, 13.0f * u, label);
+            const ImVec2 pmin(x, y), pmax(x + ts.x + 24.0f * u, y + 28.0f * u);
             dl->AddRectFilled(pmin, pmax, rgba(255, 255, 255, 14), 999.0f);
             dl->AddRect(pmin, pmax, border, 999.0f, 1.0f * u);
-            text(dl, font_regular, 13.5f * u, ImVec2(pmin.x + 13.0f * u, pmin.y + (30.0f * u - ts.y) / 2), fg, label);
+            text(dl, font_regular, 13.0f * u, ImVec2(pmin.x + 12.0f * u, pmin.y + (28.0f * u - ts.y) / 2), fg, label);
             x = pmax.x + 8.0f * u;
         };
         pill(std::to_string(game.spec->year), rgba(220, 220, 230), rgba(255, 255, 255, 40));
         pill(chip, chip_col, with_alpha(chip_col, 0.45f));
-        y += 30.0f * u + 22.0f * u;
 
-        // Play button.
-        const ImVec2 bmin(min.x + pad, y), bmax(min.x + pad + std::min(text_w, 200.0f * u), y + 52.0f * u);
+        const ImVec2 bmin(rx, y + 28.0f * u + 18.0f * u), bmax(rx + std::min(right_w, 190.0f * u), bmin.y + 52.0f * u);
         const std::string label = game.available ? "Play" : chip;
         dl->AddRectFilled(bmin, bmax, game.available ? IM_COL32_WHITE : rgba(255, 255, 255, 26), 999.0f);
         const ImVec2 ls = measure(font_bold, 19.0f * u, label);

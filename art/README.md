@@ -9,11 +9,8 @@ trademarks of SEGA.
 
 ## covers/
 
-One square cover per game, `covers/<game id>.jpg`, shown in the picker's mosaic and,
-blurred, as its backdrop. A game whose tile spans two columns (Sonic Mania, under the 2x2
-of the other four) uses `covers/<game id>-wide.jpg` when it exists (2:1, e.g. 2048x1024;
-keep the bottom-left corner calm, the title is drawn there), otherwise the middle of the
-square cover.
+One square cover per game, `covers/<game id>.jpg`, shown in the picker's row of covers
+and, blurred, as its backdrop.
 
 | File | Source | Changes |
 | --- | --- | --- |
