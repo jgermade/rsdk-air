@@ -21,6 +21,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -47,23 +48,30 @@ public class LauncherActivity extends SDLActivity {
     private volatile String importError = "";
     private volatile String importDest = null;
 
-    /** The game last started in the ":game" process (it may still be running). */
+    /** The game last started in the ":game" process (it may still be running), and how. */
     private static String runningGameId = null;
+    private static String[] runningArgs = null;
 
     /**
      * Called from native code (src/launcher/main.cpp) on the SDL thread.
      *
      * The ":game" process outlives a trip back to the picker (Home, recent apps), and
      * GameActivity is single-instance: starting it again would bring back the game that
-     * is still running, with its old arguments. So the same game is resumed, and for a
-     * different one the old process is killed and a fresh task is started.
+     * is still running, with its old arguments. So the same game started the same way
+     * (same save slot, same character) is resumed; anything else kills the old process
+     * and starts a fresh task. args go to the engine module (e.g. "--slot", "1").
      */
-    public void startGame(String gameId, String dataRoot) {
+    public void startGame(String gameId, String dataRoot, String[] args) {
+        if (args == null) {
+            args = new String[0];
+        }
         Intent intent = new Intent(this, GameActivity.class);
         intent.putExtra(GameActivity.EXTRA_GAME_ID, gameId);
         intent.putExtra(GameActivity.EXTRA_DATA_ROOT, dataRoot);
+        intent.putExtra(GameActivity.EXTRA_ARGS, args);
         boolean alive = gameProcessPid() >= 0;
-        if (!alive || !gameId.equals(runningGameId)) {
+        boolean same = gameId.equals(runningGameId) && Arrays.equals(args, runningArgs);
+        if (!alive || !same) {
             if (alive) {
                 stopGameProcess();
             }
@@ -72,6 +80,7 @@ public class LauncherActivity extends SDLActivity {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
         }
         runningGameId = gameId;
+        runningArgs = args;
         startActivity(intent);
     }
 

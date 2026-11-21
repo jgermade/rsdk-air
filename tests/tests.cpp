@@ -444,6 +444,34 @@ void test_saves_rsdkv4()
     CHECK(slots && !(*slots)[1].empty && (*slots)[1].zone == 0);
 }
 
+void test_saves_rsdkv4_labels()
+{
+    rsdkv4::Slot slot;
+    CHECK(rsdkv4::zone_label("sonic1", slot).empty());  // empty slot
+    slot.empty = false;
+    slot.list = rsdkv4::kListRegular;
+    slot.zone = 0;
+    CHECK(rsdkv4::zone_label("sonic1", slot) == "Green Hill Zone");
+    slot.zone = 3;
+    CHECK(rsdkv4::zone_label("sonic1", slot) == "Marble Zone");
+    CHECK(rsdkv4::zone_label("sonic2", slot) == "Chemical Plant Zone");
+    slot.zone = 19;
+    CHECK(rsdkv4::zone_label("sonic2", slot) == "Death Egg Zone");
+    slot.zone = 40;
+    CHECK(rsdkv4::zone_label("sonic2", slot) == "Stage 41");
+    slot.list = rsdkv4::kListSpecial;
+    slot.zone = 1;
+    CHECK(rsdkv4::zone_label("sonic1", slot) == "Special Stage 2");
+
+    slot.emeralds = 0b1011;
+    CHECK(rsdkv4::emerald_count("sonic2", slot) == 3);
+    slot.emeralds = 0x7F;
+    CHECK(rsdkv4::emerald_count("sonic2", slot) == 7);
+    CHECK(rsdkv4::emerald_count("sonic1", slot) == 6);  // only six in Sonic 1
+    CHECK(rsdkv4::character_name(3) == "Sonic & Tails");
+    CHECK(rsdkv4::character_name(9) == "Sonic");
+}
+
 #ifdef RSDKAIR_RSDKV4_MODULE
 void test_rsdkv4_module()
 {
@@ -510,6 +538,7 @@ int main(int argc, char **argv)
         {"child_process", test_child_process},
         {"ini", test_ini},
         {"saves_rsdkv4", test_saves_rsdkv4},
+        {"saves_rsdkv4_labels", test_saves_rsdkv4_labels},
 #ifdef RSDKAIR_RSDKV4_MODULE
         {"rsdkv4_module", test_rsdkv4_module},
 #endif

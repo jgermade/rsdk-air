@@ -113,4 +113,70 @@ bool delete_slot(const fs::path &save_dir, int slot, std::string &error)
     return true;
 }
 
+namespace {
+
+// Zones by position in the regular stage list, as in the Retro Engine remasters'
+// GameConfig (acts listed one after another): `first` is the zone's first act. Not
+// checked against every data version; unknown positions fall back to "Stage N".
+struct ZoneRange {
+    int first;
+    int last;
+    std::string_view name;
+};
+
+constexpr ZoneRange kSonic1Zones[] = {
+    {0, 2, "Green Hill Zone"}, {3, 5, "Marble Zone"},     {6, 8, "Spring Yard Zone"}, {9, 11, "Labyrinth Zone"},
+    {12, 14, "Star Light Zone"}, {15, 17, "Scrap Brain Zone"}, {18, 18, "Final Zone"},
+};
+
+constexpr ZoneRange kSonic2Zones[] = {
+    {0, 1, "Emerald Hill Zone"},   {2, 3, "Chemical Plant Zone"}, {4, 5, "Aquatic Ruin Zone"},
+    {6, 7, "Casino Night Zone"},   {8, 9, "Hill Top Zone"},       {10, 11, "Mystic Cave Zone"},
+    {12, 13, "Oil Ocean Zone"},    {14, 16, "Metropolis Zone"},   {17, 17, "Sky Chase Zone"},
+    {18, 18, "Wing Fortress Zone"}, {19, 19, "Death Egg Zone"},
+};
+
+} // namespace
+
+std::string zone_label(std::string_view game_id, const Slot &slot)
+{
+    if (slot.empty)
+        return {};
+    if (slot.list == kListSpecial)
+        return "Special Stage " + std::to_string(slot.zone + 1);
+    std::span<const ZoneRange> zones;
+    if (game_id == "sonic1")
+        zones = kSonic1Zones;
+    else if (game_id == "sonic2")
+        zones = kSonic2Zones;
+    for (const ZoneRange &z : zones) {
+        if (slot.zone >= z.first && slot.zone <= z.last)
+            return std::string(z.name);
+    }
+    return "Stage " + std::to_string(slot.zone + 1);
+}
+
+int emerald_total(std::string_view game_id) { return game_id == "sonic1" ? 6 : 7; }
+
+int emerald_count(std::string_view game_id, const Slot &slot)
+{
+    if (slot.empty)
+        return 0;
+    const unsigned mask = static_cast<unsigned>(slot.emeralds) & ((1u << emerald_total(game_id)) - 1);
+    int count = 0;
+    for (unsigned m = mask; m; m &= m - 1)
+        ++count;
+    return count;
+}
+
+std::string_view character_name(int character)
+{
+    switch (character) {
+    case 1: return "Tails";
+    case 2: return "Knuckles";
+    case 3: return "Sonic & Tails";
+    default: return "Sonic";
+    }
+}
+
 } // namespace rsdkair::rsdkv4

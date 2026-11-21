@@ -2,6 +2,10 @@ package org.rsdkair.launcher;
 
 import org.libsdl.app.SDLActivity;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
 /**
  * Runs one game in the ":game" process: libmain.so with "--game <id>", which loads that
  * game's engine module (lib&lt;engine&gt;.so) and hands it control. The process is killed
@@ -11,18 +15,27 @@ public class GameActivity extends SDLActivity {
 
     static final String EXTRA_GAME_ID = "org.rsdkair.launcher.GAME_ID";
     static final String EXTRA_DATA_ROOT = "org.rsdkair.launcher.DATA_ROOT";
+    /** Engine module arguments (save slot, character), passed after "--". */
+    static final String EXTRA_ARGS = "org.rsdkair.launcher.ARGS";
 
     @Override
     protected String[] getArguments() {
         String gameId = getIntent().getStringExtra(EXTRA_GAME_ID);
         String dataRoot = getIntent().getStringExtra(EXTRA_DATA_ROOT);
+        String[] extra = getIntent().getStringArrayExtra(EXTRA_ARGS);
         if (gameId == null) {
             return new String[0];
         }
-        if (dataRoot == null) {
-            return new String[] {"--game", gameId};
+        List<String> args = new ArrayList<>(Arrays.asList("--game", gameId));
+        if (dataRoot != null) {
+            args.add("--data-root");
+            args.add(dataRoot);
         }
-        return new String[] {"--game", gameId, "--data-root", dataRoot};
+        if (extra != null && extra.length > 0) {
+            args.add("--");
+            args.addAll(Arrays.asList(extra));
+        }
+        return args.toArray(new String[0]);
     }
 
     @Override
