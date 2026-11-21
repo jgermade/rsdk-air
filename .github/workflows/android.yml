@@ -48,6 +48,12 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          # Gradle dependencies and wrapper are cached between runs: fewer downloads from
+          # Maven repositories, which have failed intermittently from the runners.
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/gradle/wrapper/gradle-wrapper.properties
 
       - uses: android-actions/setup-android@v3
         with:
@@ -60,10 +66,23 @@ jobs:
       - name: Build APK
         working-directory: android
         run: |
+          set -o pipefail  # gradlew's status, not tee's (not the default without shell:)
           plus=false
           [ "$RSDKAIR_ENABLE_PLUS" = "ON" ] && plus=true
-          ./gradlew --no-daemon assembleRelease \
-            -PrsdkairVersion="$RSDKAIR_VERSION" -PrsdkairEnablePlus="$plus"
+          # Retried only when Gradle could not download a dependency (seen twice from the
+          # runners: an artifact "not found" in every repository, fine on the next run).
+          # Any other failure, like a compile error, fails at once.
+          for attempt in 1 2 3; do
+            if ./gradlew --no-daemon assembleRelease \
+                -PrsdkairVersion="$RSDKAIR_VERSION" -PrsdkairEnablePlus="$plus" 2>&1 | tee gradle.log; then
+              break
+            fi
+            if [ "$attempt" = 3 ] || ! grep -qE 'Could not (resolve|find|GET|download)' gradle.log; then
+              exit 1
+            fi
+            echo "::warning::Gradle could not download a dependency (attempt $attempt); retrying in 30 s"
+            sleep 30
+          done
           mkdir -p ../dist
           cp app/build/outputs/apk/release/app-release.apk ../dist/rsdk-air-android.apk
 
