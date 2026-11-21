@@ -1,11 +1,13 @@
 package org.rsdkair.launcher;
 
+import android.app.ActivityManager;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Process;
 import android.util.Log;
 import android.view.DisplayCutout;
 import android.view.View;
@@ -19,6 +21,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.List;
 
 /**
  * Runs the picker (libmain.so with no arguments). When a game is chosen, native code
@@ -44,12 +47,66 @@ public class LauncherActivity extends SDLActivity {
     private volatile String importError = "";
     private volatile String importDest = null;
 
-    /** Called from native code (src/launcher/main.cpp) on the SDL thread. */
+    /** The game last started in the ":game" process (it may still be running). */
+    private static String runningGameId = null;
+
+    /**
+     * Called from native code (src/launcher/main.cpp) on the SDL thread.
+     *
+     * The ":game" process outlives a trip back to the picker (Home, recent apps), and
+     * GameActivity is single-instance: starting it again would bring back the game that
+     * is still running, with its old arguments. So the same game is resumed, and for a
+     * different one the old process is killed and a fresh task is started.
+     */
     public void startGame(String gameId, String dataRoot) {
         Intent intent = new Intent(this, GameActivity.class);
         intent.putExtra(GameActivity.EXTRA_GAME_ID, gameId);
         intent.putExtra(GameActivity.EXTRA_DATA_ROOT, dataRoot);
+        boolean alive = gameProcessPid() >= 0;
+        if (!alive || !gameId.equals(runningGameId)) {
+            if (alive) {
+                stopGameProcess();
+            }
+            // Drop the old task (and its saved activity), so GameActivity is created anew
+            // with this intent.
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        }
+        runningGameId = gameId;
         startActivity(intent);
+    }
+
+    /** The pid of the ":game" process, or -1 if it is not running. */
+    private int gameProcessPid() {
+        ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+        List<ActivityManager.RunningAppProcessInfo> processes = am != null ? am.getRunningAppProcesses() : null;
+        if (processes == null) {
+            return -1;
+        }
+        String name = getPackageName() + ":game";
+        for (ActivityManager.RunningAppProcessInfo info : processes) {
+            if (name.equals(info.processName)) {
+                return info.pid;
+            }
+        }
+        return -1;
+    }
+
+    /** Kills the ":game" process and waits (up to about a second) until it is gone. */
+    private void stopGameProcess() {
+        int pid = gameProcessPid();
+        if (pid < 0) {
+            return;
+        }
+        Log.i(TAG, "stopping the running game (" + runningGameId + ") to start another one");
+        Process.killProcess(pid);
+        for (int i = 0; i < 50 && gameProcessPid() >= 0; ++i) {
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 
     /**
