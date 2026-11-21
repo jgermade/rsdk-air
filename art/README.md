@@ -11,6 +11,9 @@ trademarks of SEGA.
 
 One square cover per game, `covers/<game id>.jpg`, shown in the picker's row of covers
 and, blurred, as its backdrop.
+The picker shows covers at 4:5, so it trims the sides of the square art: evenly, except
+where `cover_anchor_x()` in `src/launcher/picker.cpp` says otherwise (Sonic CD keeps its
+right edge, where the CD is).
 
 | File | Source | Changes |
 | --- | --- | --- |

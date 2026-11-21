@@ -146,6 +146,15 @@ struct Cover {
     SDL_Texture *glow = nullptr;  // blurred art, for the backdrop
 };
 
+// Which part of a cover to keep when it is cropped to the tile, from 0 (keep the left
+// edge) to 1 (keep the right edge). Centred unless the art needs otherwise.
+float cover_anchor_x(std::string_view id)
+{
+    if (id == "soniccd")
+        return 1.0f;  // the CD sits on the right edge
+    return 0.5f;
+}
+
 // The engine's name as players know it, in capitals for the panel's label.
 std::string engine_label(std::string_view module)
 {
@@ -460,7 +469,7 @@ struct Picker::Impl {
             ImVec2 uv0(0, 0), uv1(1, 1);
             if (art_aspect > tile_aspect) {
                 const float k = tile_aspect / art_aspect;
-                uv0.x = (1 - k) / 2, uv1.x = (1 + k) / 2;
+                uv0.x = (1 - k) * cover_anchor_x(game.spec->id), uv1.x = uv0.x + k;
             } else {
                 const float k = art_aspect / tile_aspect;
                 uv0.y = (1 - k) / 2, uv1.y = (1 + k) / 2;
