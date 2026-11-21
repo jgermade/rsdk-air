@@ -389,10 +389,10 @@ struct Picker::Impl {
         const float left = origin.x + margin;
         float top = 96.0f * u;
         const float width = size.x - 2 * margin;
-        // Portrait (a phone held upright): two covers per row, 2 + 2 + 1 for five games.
-        const bool portrait = size.y > size.x;
-        int cols = portrait ? std::min(2, std::max(1, count)) : std::max(1, count);
         auto tile_for = [&](int c) { return (width - static_cast<float>(c - 1) * gap) / static_cast<float>(c); };
+        if (size.y > size.x)
+            return layout_portrait(l, count, origin, size, top, gap, margin, tile_for(2));
+        int cols = std::max(1, count);
         while (cols > 1 && tile_for(cols) < 130.0f * u)
             --cols;
         // Leave room below for the panel (about 190 px) and the hints.
@@ -400,27 +400,60 @@ struct Picker::Impl {
         const float room = size.y - top - 64.0f * u - 200.0f * u;
         const float by_height =
             (room - static_cast<float>(rows) * (kCaption * u + gap)) / static_cast<float>(rows) / kCoverAspect;
-        // In portrait the covers may grow to fill the width; in landscape they stop at 240.
-        const float cap = portrait ? tile_for(cols) : 240.0f * u;
-        l.tile = std::max(64.0f * u, std::min({tile_for(cols), by_height, cap}));
+        l.tile = std::max(64.0f * u, std::min({tile_for(cols), by_height, 240.0f * u}));
         l.tile_h = l.tile * kCoverAspect;
         // Centre covers + panel (about 160 px) vertically in the space between header and hints.
         const float block = static_cast<float>(rows) * (l.tile_h + kCaption * u + gap) - gap + 22.0f * u + 160.0f * u;
         top = origin.y + std::max(top, top + (size.y - 64.0f * u - top - block) / 2);
         for (int i = 0; i < count; ++i) {
-            float x = left + static_cast<float>(i % cols) * (l.tile + gap);
-            if (portrait) {
-                // Centre each row, so the last, shorter one sits in the middle.
-                const int in_row = std::min(cols, count - (i / cols) * cols);
-                const float row_w = static_cast<float>(in_row) * l.tile + static_cast<float>(in_row - 1) * gap;
-                x += (width - row_w) / 2;
-            }
+            const float x = left + static_cast<float>(i % cols) * (l.tile + gap);
             const float y = top + static_cast<float>(i / cols) * (l.tile_h + kCaption * u + gap);
             l.min.emplace_back(x, y);
             l.max.emplace_back(x + l.tile, y + l.tile_h);
         }
         const float grid_bottom = top + static_cast<float>(rows) * (l.tile_h + kCaption * u + gap) - gap;
         l.panel_min = ImVec2(left, grid_bottom + 22.0f * u);
+        l.panel_max = ImVec2(origin.x + size.x - margin, origin.y + size.y - 62.0f * u);
+        return l;
+    }
+
+    // Portrait (a phone held upright): square covers two per row; with an odd count the
+    // last one spans both columns at 16:9 (2 + 2 + 1 wide for five games).
+    Layout layout_portrait(Layout &l, int count, ImVec2 origin, ImVec2 size, float top, float gap, float margin,
+                           float max_tile) const
+    {
+        const float u = l.u;
+        const float cap = kCaption * u;
+        const float width = size.x - 2 * margin;
+        const int full_rows = count / 2;
+        const bool wide_last = count % 2 == 1;
+        constexpr float kWide = 9.0f / 16.0f;  // height / width of the wide cover
+        // Height used: full_rows * (tile + cap + gap) + [ (2 tile + gap) * kWide + cap ].
+        const float room = size.y - top - 64.0f * u - 200.0f * u;
+        const float per_tile = static_cast<float>(full_rows) + (wide_last ? 2 * kWide : 0.0f);
+        const float fixed = static_cast<float>(full_rows) * (cap + gap) + (wide_last ? gap * kWide + cap : -gap);
+        const float by_height = per_tile > 0 ? (room - fixed) / per_tile : max_tile;
+        l.tile = std::max(64.0f * u, std::min(max_tile, by_height));
+        l.tile_h = l.tile;
+        const float grid_w = count > 1 ? 2 * l.tile + gap : l.tile;
+        const float wide_h = grid_w * kWide;
+        const float block = static_cast<float>(full_rows) * (l.tile + cap + gap) + (wide_last ? wide_h + cap : -gap) +
+                            22.0f * u + 160.0f * u;
+        top = origin.y + std::max(top, top + (size.y - 64.0f * u - top - block) / 2);
+        const float x0 = origin.x + margin + (width - grid_w) / 2;
+        for (int i = 0; i < count; ++i) {
+            const float y = top + static_cast<float>(i / 2) * (l.tile + cap + gap);
+            if (wide_last && i == count - 1) {
+                l.min.emplace_back(x0, y);
+                l.max.emplace_back(x0 + grid_w, y + wide_h);
+            } else {
+                const float x = x0 + static_cast<float>(i % 2) * (l.tile + gap);
+                l.min.emplace_back(x, y);
+                l.max.emplace_back(x + l.tile, y + l.tile);
+            }
+        }
+        const float grid_bottom = l.max.empty() ? top : l.max.back().y + cap;  // caption under the last row
+        l.panel_min = ImVec2(origin.x + margin, grid_bottom + 22.0f * u);
         l.panel_max = ImVec2(origin.x + size.x - margin, origin.y + size.y - 62.0f * u);
         return l;
     }
@@ -602,7 +635,8 @@ struct Picker::Impl {
         const float ty = l.max[index].y + 12.0f * u + grow;
         const std::string title(game.spec->title);
         const float title_w = measure(font_bold, 15.0f * u, title).x;
-        const float title_size = title_w > l.tile ? 15.0f * u * l.tile / title_w : 15.0f * u;  // narrow tiles
+        const float tile_w = l.max[index].x - l.min[index].x;
+        const float title_size = title_w > tile_w ? 15.0f * u * tile_w / title_w : 15.0f * u;  // narrow tiles
         text(dl, focused ? font_bold : font_regular, title_size, ImVec2(l.min[index].x + 2.0f * u, ty),
              focused ? IM_COL32_WHITE : rgba(196, 196, 208), title);
         text(dl, font_regular, 12.5f * u, ImVec2(l.min[index].x + 2.0f * u, ty + 20.0f * u), rgba(140, 140, 155),
