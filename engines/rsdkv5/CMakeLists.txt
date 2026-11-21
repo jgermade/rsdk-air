@@ -113,7 +113,8 @@ rsdkair_engine_module(rsdkv5
 set_target_properties(rsdkv5 PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 
 if(ANDROID)
-    target_include_directories(rsdkv5 BEFORE PRIVATE "${RSDKV5_SHADOW_INCLUDE}")
+    # The copy's own relative includes ("Link.hpp", "Legacy/...") resolve from RSDK/Core.
+    target_include_directories(rsdkv5 BEFORE PRIVATE "${RSDKV5_SHADOW_INCLUDE}" "${V5}/RSDK/Core")
     target_compile_definitions(rsdkv5 PRIVATE RSDKAIR_ANDROID_AS_LINUX=1)
 endif()
 target_include_directories(rsdkv5 PRIVATE
