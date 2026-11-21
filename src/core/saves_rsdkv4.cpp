@@ -2,6 +2,7 @@
 
 #include <rsdkair/paths.hpp>
 
+#include <algorithm>
 #include <fstream>
 #include <system_error>
 #include <vector>
@@ -115,45 +116,65 @@ bool delete_slot(const fs::path &save_dir, int slot, std::string &error)
 
 namespace {
 
-// Zones by position in the regular stage list, as in the Retro Engine remasters'
-// GameConfig (acts listed one after another): `first` is the zone's first act. Not
-// checked against every data version; unknown positions fall back to "Stage N".
-struct ZoneRange {
-    int first;
-    int last;
+// rsdkv4-wasm's STAGES table: zone name and first scene, in the regular stage list.
+struct Zone {
     std::string_view name;
+    int first_scene;
 };
 
-constexpr ZoneRange kSonic1Zones[] = {
-    {0, 2, "Green Hill Zone"}, {3, 5, "Marble Zone"},     {6, 8, "Spring Yard Zone"}, {9, 11, "Labyrinth Zone"},
-    {12, 14, "Star Light Zone"}, {15, 17, "Scrap Brain Zone"}, {18, 18, "Final Zone"},
+struct Pack {
+    std::string_view folder;  // under art/stages/
+    int scenes;               // regular-list scenes the table covers
+    int art;                  // zones 1..art have a portrait
+    std::span<const Zone> zones;
 };
 
-constexpr ZoneRange kSonic2Zones[] = {
-    {0, 1, "Emerald Hill Zone"},   {2, 3, "Chemical Plant Zone"}, {4, 5, "Aquatic Ruin Zone"},
-    {6, 7, "Casino Night Zone"},   {8, 9, "Hill Top Zone"},       {10, 11, "Mystic Cave Zone"},
-    {12, 13, "Oil Ocean Zone"},    {14, 16, "Metropolis Zone"},   {17, 17, "Sky Chase Zone"},
-    {18, 18, "Wing Fortress Zone"}, {19, 19, "Death Egg Zone"},
+constexpr Zone kSonic1Zones[] = {
+    {"GREEN HILL", 0}, {"MARBLE", 3},       {"SPRING YARD", 6}, {"LABYRINTH", 9},
+    {"STARLIGHT", 12}, {"SCRAP BRAIN", 15}, {"FINAL", 18},
 };
+
+constexpr Zone kSonic2Zones[] = {
+    {"EMERALD HILL", 0},   {"CHEMICAL PLANT", 2}, {"AQUATIC RUIN", 4}, {"CASINO NIGHT", 6},
+    {"HILL TOP", 8},       {"MYSTIC CAVE", 10},   {"OIL OCEAN", 12},   {"METROPOLIS", 14},
+    {"SKY CHASE", 17},     {"WING FORTRESS", 18}, {"DEATH EGG", 19},   {"HIDDEN PALACE", 20},
+};
+
+constexpr Pack kSonic1 = {"sonic1", 19, 7, kSonic1Zones};
+constexpr Pack kSonic2 = {"sonic2", 21, 10, kSonic2Zones};
+
+const Pack &pack_for(std::string_view game_id) { return game_id == "sonic2" ? kSonic2 : kSonic1; }
 
 } // namespace
 
-std::string zone_label(std::string_view game_id, const Slot &slot)
+std::optional<SlotZone> describe_slot(std::string_view game_id, const Slot &slot)
 {
     if (slot.empty)
-        return {};
-    if (slot.list == kListSpecial)
-        return "Special Stage " + std::to_string(slot.zone + 1);
-    std::span<const ZoneRange> zones;
-    if (game_id == "sonic1")
-        zones = kSonic1Zones;
-    else if (game_id == "sonic2")
-        zones = kSonic2Zones;
-    for (const ZoneRange &z : zones) {
-        if (slot.zone >= z.first && slot.zone <= z.last)
-            return std::string(z.name);
+        return std::nullopt;
+    const Pack &pack = pack_for(game_id);
+    const std::string folder = "stages/" + std::string(pack.folder) + "/";
+    SlotZone zone;
+    if (slot.list == kListSpecial) {
+        zone.name = "SPECIAL STAGE";
+        zone.tag = "STAGE " + std::to_string(slot.zone + 1);
+        zone.art = folder + "special.png";
+        return zone;
     }
-    return "Stage " + std::to_string(slot.zone + 1);
+    if (slot.zone < 0 || slot.zone >= pack.scenes) {
+        zone.name = "UNKNOWN ZONE";
+        return zone;
+    }
+    std::size_t index = 0;
+    for (std::size_t i = 0; i < pack.zones.size(); ++i) {
+        if (slot.zone >= pack.zones[i].first_scene)
+            index = i;
+    }
+    zone.name = std::string(pack.zones[index].name);
+    zone.tag = "ZONE " + std::to_string(index + 1);
+    zone.act = slot.zone - pack.zones[index].first_scene + 1;
+    if (static_cast<int>(index) < pack.art)
+        zone.art = folder + "zone-" + std::to_string(index + 1) + ".png";
+    return zone;
 }
 
 int emerald_total(std::string_view game_id) { return game_id == "sonic1" ? 6 : 7; }
@@ -162,11 +183,13 @@ int emerald_count(std::string_view game_id, const Slot &slot)
 {
     if (slot.empty)
         return 0;
-    const unsigned mask = static_cast<unsigned>(slot.emeralds) & ((1u << emerald_total(game_id)) - 1);
-    int count = 0;
-    for (unsigned m = mask; m; m &= m - 1)
-        ++count;
-    return count;
+    int count = slot.emeralds;
+    if (count < 0 || count > 7) {
+        count = 0;
+        for (unsigned m = static_cast<unsigned>(slot.emeralds); m; m &= m - 1)
+            ++count;
+    }
+    return std::min(count, emerald_total(game_id));
 }
 
 std::string_view character_name(int character)

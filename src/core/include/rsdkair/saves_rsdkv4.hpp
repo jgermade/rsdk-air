@@ -55,13 +55,21 @@ std::optional<std::array<Slot, kSlotCount>> read_slots(const std::filesystem::pa
 // error set if the file cannot be read or written.
 bool delete_slot(const std::filesystem::path &save_dir, int slot, std::string &error);
 
-// Where a saved slot continues, for the slot screen: "Marble Zone", "Special Stage 2",
-// or "Stage 21" for a position the table does not know. Empty for an empty slot.
-// game_id is "sonic1" or "sonic2".
-std::string zone_label(std::string_view game_id, const Slot &slot);
+// Where a saved slot continues, for the slot screen. Same table as rsdkv4-wasm's app
+// (STAGES, from craft's game.service.js): each zone's first scene in the regular stage
+// list; a save points at an act (Scrap Brain 3 is scene 17).
+struct SlotZone {
+    std::string name;  // "AQUATIC RUIN", "SPECIAL STAGE", "UNKNOWN ZONE"
+    std::string tag;   // "ZONE 3", "STAGE 2", or empty
+    int act = 0;       // 1-based act within the zone, 0 when not applicable
+    std::string art;   // portrait under art/, e.g. "stages/sonic2/zone-3.png"; may be empty
+};
 
-// How many Chaos Emeralds a slot has (the game stores them as a bit mask); at most
-// emerald_total(game_id).
+// Nothing for an empty slot. game_id is "sonic1" or "sonic2".
+std::optional<SlotZone> describe_slot(std::string_view game_id, const Slot &slot);
+
+// How many Chaos Emeralds a slot has. RSDKv4 stores how many, not which; a value out of
+// range is counted by bits (as rsdkv4-wasm does). At most emerald_total(game_id).
 int emerald_count(std::string_view game_id, const Slot &slot);
 int emerald_total(std::string_view game_id);  // 6 in Sonic 1, 7 in Sonic 2
 

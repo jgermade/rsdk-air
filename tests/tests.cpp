@@ -447,27 +447,41 @@ void test_saves_rsdkv4()
 void test_saves_rsdkv4_labels()
 {
     rsdkv4::Slot slot;
-    CHECK(rsdkv4::zone_label("sonic1", slot).empty());  // empty slot
+    CHECK(!rsdkv4::describe_slot("sonic1", slot));  // empty slot
     slot.empty = false;
     slot.list = rsdkv4::kListRegular;
     slot.zone = 0;
-    CHECK(rsdkv4::zone_label("sonic1", slot) == "Green Hill Zone");
-    slot.zone = 3;
-    CHECK(rsdkv4::zone_label("sonic1", slot) == "Marble Zone");
-    CHECK(rsdkv4::zone_label("sonic2", slot) == "Chemical Plant Zone");
-    slot.zone = 19;
-    CHECK(rsdkv4::zone_label("sonic2", slot) == "Death Egg Zone");
-    slot.zone = 40;
-    CHECK(rsdkv4::zone_label("sonic2", slot) == "Stage 41");
+    auto z = rsdkv4::describe_slot("sonic1", slot);
+    CHECK(z && z->name == "GREEN HILL" && z->tag == "ZONE 1" && z->act == 1 && z->art == "stages/sonic1/zone-1.png");
+    slot.zone = 17;  // Scrap Brain 3
+    z = rsdkv4::describe_slot("sonic1", slot);
+    CHECK(z && z->name == "SCRAP BRAIN" && z->act == 3 && z->art == "stages/sonic1/zone-6.png");
+    slot.zone = 5;  // Aquatic Ruin 2
+    z = rsdkv4::describe_slot("sonic2", slot);
+    CHECK(z && z->name == "AQUATIC RUIN" && z->tag == "ZONE 3" && z->act == 2);
+    slot.zone = 16;  // Metropolis 3
+    z = rsdkv4::describe_slot("sonic2", slot);
+    CHECK(z && z->name == "METROPOLIS" && z->act == 3);
+    slot.zone = 20;  // Hidden Palace: no portrait
+    z = rsdkv4::describe_slot("sonic2", slot);
+    CHECK(z && z->name == "HIDDEN PALACE" && z->art.empty());
+    slot.zone = 21;
+    z = rsdkv4::describe_slot("sonic2", slot);
+    CHECK(z && z->name == "UNKNOWN ZONE" && z->tag.empty());
     slot.list = rsdkv4::kListSpecial;
     slot.zone = 1;
-    CHECK(rsdkv4::zone_label("sonic1", slot) == "Special Stage 2");
+    z = rsdkv4::describe_slot("sonic1", slot);
+    CHECK(z && z->name == "SPECIAL STAGE" && z->tag == "STAGE 2" && z->art == "stages/sonic1/special.png");
 
-    slot.emeralds = 0b1011;
-    CHECK(rsdkv4::emerald_count("sonic2", slot) == 3);
-    slot.emeralds = 0x7F;
+    slot.emeralds = 4;  // a count
+    CHECK(rsdkv4::emerald_count("sonic2", slot) == 4);
+    slot.emeralds = 7;
     CHECK(rsdkv4::emerald_count("sonic2", slot) == 7);
     CHECK(rsdkv4::emerald_count("sonic1", slot) == 6);  // only six in Sonic 1
+    slot.emeralds = 0x7F;  // out of range: counted by bits
+    CHECK(rsdkv4::emerald_count("sonic2", slot) == 7);
+    slot.emeralds = 0b1011 << 3;
+    CHECK(rsdkv4::emerald_count("sonic2", slot) == 3);
     CHECK(rsdkv4::character_name(3) == "Sonic & Tails");
     CHECK(rsdkv4::character_name(9) == "Sonic");
 }
