@@ -4,7 +4,11 @@ import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Build;
 import android.util.Log;
+import android.view.DisplayCutout;
+import android.view.View;
+import android.view.WindowInsets;
 
 import org.libsdl.app.SDLActivity;
 
@@ -58,5 +62,42 @@ public class LauncherActivity extends SDLActivity {
             Log.w(TAG, "cannot open " + filePath + " in " + packageName, e);
             return false;
         }
+    }
+
+    /**
+     * Called from native code (src/launcher/picker.cpp). How many pixels of each screen
+     * edge (left, top, right, bottom) are covered by visible system bars or by a display
+     * cutout; the picker lays its content out inside the rest.
+     */
+    public int[] getSafeInsets() {
+        int[] out = new int[4];
+        View decor = getWindow() != null ? getWindow().getDecorView() : null;
+        WindowInsets insets = decor != null ? decor.getRootWindowInsets() : null;
+        if (insets == null) {
+            return out;
+        }
+        if (Build.VERSION.SDK_INT >= 30 /* Android 11 */) {
+            android.graphics.Insets i = insets.getInsets(
+                    WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+            out[0] = i.left;
+            out[1] = i.top;
+            out[2] = i.right;
+            out[3] = i.bottom;
+            return out;
+        }
+        out[0] = insets.getSystemWindowInsetLeft();
+        out[1] = insets.getSystemWindowInsetTop();
+        out[2] = insets.getSystemWindowInsetRight();
+        out[3] = insets.getSystemWindowInsetBottom();
+        if (Build.VERSION.SDK_INT >= 28 /* Android 9 */) {
+            DisplayCutout cutout = insets.getDisplayCutout();
+            if (cutout != null) {
+                out[0] = Math.max(out[0], cutout.getSafeInsetLeft());
+                out[1] = Math.max(out[1], cutout.getSafeInsetTop());
+                out[2] = Math.max(out[2], cutout.getSafeInsetRight());
+                out[3] = Math.max(out[3], cutout.getSafeInsetBottom());
+            }
+        }
+        return out;
     }
 }
