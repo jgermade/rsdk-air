@@ -42,6 +42,15 @@ if(ANDROID)
 [=[#elif defined __ANDROID__ && !defined RSDKAIR_ANDROID_AS_LINUX // rsdk-air
 #define RETRO_PLATFORM   (RETRO_ANDROID)]=])
     rsdkair_patch_end(engine_hpp RSDKV5_ENGINE_HPP)
+    # iniparser.cpp keeps upstream's Android fOpen (Java-side, androidHelpers.cpp) on
+    # Android; as on Linux, plain fopen is what reads Settings.ini here.
+    rsdkair_patch_begin(iniparser "${UP}/dependencies/all/iniparser/iniparser.cpp")
+    rsdkair_patch_replace(iniparser [=[#ifndef __ANDROID__
+#undef fOpen]=]
+[=[#if !defined(__ANDROID__) || defined(RSDKAIR_ANDROID_AS_LINUX) // rsdk-air
+#undef fOpen]=])
+    rsdkair_patch_end(iniparser RSDKV5_INIPARSER_CPP)
+
     set(RSDKV5_SHADOW_INCLUDE "${CMAKE_CURRENT_BINARY_DIR}/shadow-include")
     configure_file("${RSDKV5_ENGINE_HPP}" "${RSDKV5_SHADOW_INCLUDE}/RSDK/Core/RetroEngine.hpp" COPYONLY)
 endif()
@@ -80,6 +89,9 @@ set(RSDKV5_SOURCES
     ${UP}/dependencies/all/iniparser/dictionary.cpp
     ${UP}/dependencies/all/miniz/miniz.c
 )
+if(ANDROID)
+    list(TRANSFORM RSDKV5_SOURCES REPLACE ".*/iniparser/iniparser\\.cpp$" "${RSDKV5_INIPARSER_CPP}")
+endif()
 
 # Sonic Mania's game logic: plain C, every object in one translation unit (All.c).
 add_library(rsdkair_mania_logic STATIC
