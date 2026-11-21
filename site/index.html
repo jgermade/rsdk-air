@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rsdk-air</title>
+<meta name="description" content="One native app for the RSDK engine decompilations and Sonic 3 A.I.R., for Windows, Linux, macOS and Android. Bring your own game files.">
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --text: #1b1f24;
+    --muted: #57606a;
+    --border: #d8dee4;
+    --accent: #1f6feb;
+    --accent-text: #ffffff;
+    --code-bg: #eef1f4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --text: #e6edf3;
+      --muted: #9198a1;
+      --border: #30363d;
+      --accent: #4493f8;
+      --accent-text: #0d1117;
+      --code-bg: #1f252d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 860px; margin: 0 auto; padding: 48px 16px 64px; }
+  header h1 { font-size: 2.4rem; margin: 0 0 4px; letter-spacing: -0.02em; }
+  header p { margin: 0; color: var(--muted); font-size: 1.1rem; }
+  .version { color: var(--muted); font-size: 0.9rem; margin-top: 8px; }
+  section { margin-top: 40px; }
+  h2 { font-size: 1.3rem; margin: 0 0 12px; }
+  .downloads { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .downloads a {
+    display: block; padding: 14px 16px; border-radius: 10px; text-decoration: none;
+    background: var(--surface); border: 1px solid var(--border); color: var(--text);
+  }
+  .downloads a:hover { border-color: var(--accent); }
+  .downloads strong { display: block; }
+  .downloads span { color: var(--muted); font-size: 0.9rem; }
+  table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  th { font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+  code { background: var(--code-bg); padding: 1px 6px; border-radius: 5px; font-size: 0.9em; word-break: break-all; }
+  .table-wrap { overflow-x: auto; }
+  a { color: var(--accent); }
+  footer { margin-top: 56px; color: var(--muted); font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>rsdk-air</h1>
+    <p>One app for the RSDK engine decompilations and Sonic 3 A.I.R. Pick a game when it starts.</p>
+    <div class="version">Latest release: v__VERSION__ · <a href="https://github.com/__REPOSITORY__/releases/latest">release notes</a></div>
+  </header>
+
+  <section>
+    <h2>Download</h2>
+    <div class="downloads">
+      <a href="https://github.com/__REPOSITORY__/releases/latest/download/rsdk-air-windows-x64.zip"><strong>Windows</strong><span>x64 · .zip</span></a>
+      <a href="https://github.com/__REPOSITORY__/releases/latest/download/rsdk-air-linux-x64.tar.gz"><strong>Linux</strong><span>x64 · .tar.gz</span></a>
+      <a href="https://github.com/__REPOSITORY__/releases/latest/download/rsdk-air-macos-arm64.tar.gz"><strong>macOS</strong><span>Apple silicon · .tar.gz</span></a>
+      <a href="https://github.com/__REPOSITORY__/releases/latest/download/rsdk-air-android.apk"><strong>Android</strong><span>arm64 · .apk</span></a>
+    </div>
+  </section>
+
+  <section>
+    <h2>Your game files</h2>
+    <p>No game data is included. Copy the files from games you own into the data folder:</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Game</th><th>File</th><th>Folder (inside the data folder)</th></tr></thead>
+        <tbody>
+          <tr><td>Sonic the Hedgehog</td><td><code>Data.rsdk</code></td><td><code>games/sonic1/</code></td></tr>
+          <tr><td>Sonic the Hedgehog 2</td><td><code>Data.rsdk</code></td><td><code>games/sonic2/</code></td></tr>
+          <tr><td>Sonic CD</td><td><code>Data.rsdk</code></td><td><code>games/soniccd/</code></td></tr>
+          <tr><td>Sonic 3 A.I.R.</td><td><code>Sonic_Knuckles_wSonic3.bin</code> (4 MB)</td><td><code>games/s3air/</code></td></tr>
+          <tr><td>Sonic Mania</td><td><code>Data.rsdk</code></td><td><code>games/mania/</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The data folder is:</p>
+    <div class="table-wrap">
+      <table>
+        <tbody>
+          <tr><td>Windows</td><td><code>%APPDATA%\rsdk-air\</code></td></tr>
+          <tr><td>Linux</td><td><code>~/.local/share/rsdk-air/</code></td></tr>
+          <tr><td>macOS</td><td><code>~/Library/Application Support/rsdk-air/</code></td></tr>
+          <tr><td>Android</td><td>importing files from the app is coming in a later release</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Run <code>rsdk-air --list</code> to see which games were found, and why the others were not.</p>
+  </section>
+
+  <section>
+    <h2>Credits and licenses</h2>
+    <p>rsdk-air bundles the work of others, under their own licenses (copies in each download's <code>licenses/</code> folder):</p>
+    <ul>
+      <li>RSDK v3 and v4 by Christian “Taxman” Whitehead; RSDK v5 by Evening Star. Decompilations by Rubberduckycooly, st×tic and chuliRMG (<a href="https://github.com/RSDKModding">RSDKModding</a>), under non-commercial licenses.</li>
+      <li>Sonic 3 A.I.R. by Eukaryot (<a href="https://github.com/Eukaryot/sonic3air">source</a>), under the GPL-3.0.</li>
+      <li>SDL2 (zlib license).</li>
+    </ul>
+    <p>rsdk-air itself is open source under the MIT License: <a href="https://github.com/__REPOSITORY__">source code</a>. It is a non-profit fan project.</p>
+  </section>
+
+  <footer>
+    Not affiliated with or endorsed by SEGA. Sonic the Hedgehog and related names are trademarks of SEGA.
+  </footer>
+</main>
+</body>
+</html>

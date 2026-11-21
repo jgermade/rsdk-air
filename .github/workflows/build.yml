@@ -1,0 +1,129 @@
+# Tests and builds rsdk-air for Windows, Linux, macOS and Android.
+#
+# Runs on every push to main (there is no pull_request trigger on purpose) and is called
+# by release.yml with the release version. See ROADMAP/2026-11-20/upstreams-and-licensing.md.
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_call:
+    inputs:
+      version:
+        description: "Version to embed (X.Y.Z). Empty: 0.0.0-dev."
+        type: string
+        default: ""
+      enable_plus:
+        description: "Plus DLC. Only honoured in private repositories."
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  RSDKAIR_VERSION: ${{ inputs.version != '' && inputs.version || '0.0.0-dev' }}
+  # Plus can only ever be on in a private repository: in a public one, artifacts and
+  # releases are visible to anyone, which the RSDK licenses do not allow for Plus builds.
+  RSDKAIR_ENABLE_PLUS: ${{ inputs.enable_plus == true && github.event.repository.private == true && 'ON' || 'OFF' }}
+
+jobs:
+  desktop:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            os: ubuntu-24.04
+            archive: tar.gz
+          - name: windows-x64
+            os: windows-2022
+            archive: zip
+          - name: macos-arm64
+            os: macos-14
+            archive: tar.gz
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build \
+            libasound2-dev libpulse-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxi-dev libxss-dev libxfixes-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev \
+            libgl1-mesa-dev libgles2-mesa-dev libdbus-1-dev libudev-dev libdecor-0-dev
+
+      - name: Configure
+        shell: bash
+        run: |
+          generator=()
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            [ "$RUNNER_OS" = "macOS" ] && brew install ninja
+            generator=(-G Ninja)
+          fi
+          cmake -S . -B build "${generator[@]}" -DCMAKE_BUILD_TYPE=Release \
+            -DRSDKAIR_VERSION="$RSDKAIR_VERSION" -DRSDKAIR_ENABLE_PLUS="$RSDKAIR_ENABLE_PLUS"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Package
+        shell: bash
+        run: |
+          cmake --install build --config Release --prefix "dist/rsdk-air"
+          cd dist
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            7z a -tzip "rsdk-air-${{ matrix.name }}.zip" rsdk-air >/dev/null
+          else
+            tar -czf "rsdk-air-${{ matrix.name }}.tar.gz" rsdk-air
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rsdk-air-${{ matrix.name }}${{ env.RSDKAIR_ENABLE_PLUS == 'ON' && '-plus-private' || '' }}
+          path: dist/rsdk-air-${{ matrix.name }}.${{ matrix.archive }}
+          retention-days: 7
+          if-no-files-found: error
+
+  android:
+    name: android
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install NDK and CMake
+        run: sdkmanager "ndk;27.2.12479018" "cmake;3.22.1"
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          plus=false
+          [ "$RSDKAIR_ENABLE_PLUS" = "ON" ] && plus=true
+          ./gradlew --no-daemon assembleRelease \
+            -PrsdkairVersion="$RSDKAIR_VERSION" -PrsdkairEnablePlus="$plus"
+          mkdir -p ../dist
+          cp app/build/outputs/apk/release/app-release.apk ../dist/rsdk-air-android.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rsdk-air-android${{ env.RSDKAIR_ENABLE_PLUS == 'ON' && '-plus-private' || '' }}
+          path: dist/rsdk-air-android.apk
+          retention-days: 7
+          if-no-files-found: error
