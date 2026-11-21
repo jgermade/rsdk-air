@@ -20,6 +20,10 @@
 #include <string_view>
 #include <vector>
 
+#if defined(__ANDROID__)
+#include <jni.h>
+#endif
+
 namespace rsdkair {
 
 namespace {
@@ -201,6 +205,18 @@ bool installable(const GameStatus &game)
 #endif
 }
 
+// A game whose data the player can import with the system file picker (Android only: the
+// data folder is private to the app, so there is no other way to put files there).
+bool importable(const GameStatus &game)
+{
+#if defined(__ANDROID__)
+    return game.engine_found && !game.available;
+#else
+    (void)game;
+    return false;
+#endif
+}
+
 enum class Action { None, Left, Right, Up, Down, Accept, Back };
 
 } // namespace
@@ -227,6 +243,52 @@ struct Picker::Impl {
     int stick_dir = 0;             // last left-stick direction, for repeats
     Uint32 stick_next = 0;
     bool pointer_used = false;     // hover moves the focus only after the mouse moved
+    float inset_l = 0, inset_t = 0, inset_r = 0, inset_b = 0;  // unsafe screen edges (Android)
+
+    // Asks Android which edges of the screen are covered by system bars or a display
+    // cutout (camera notch). Elsewhere the whole window is usable.
+    void update_insets()
+    {
+#if defined(__ANDROID__)
+        auto *env = static_cast<JNIEnv *>(SDL_AndroidGetJNIEnv());
+        auto activity = static_cast<jobject>(SDL_AndroidGetActivity());
+        if (!env || !activity)
+            return;
+        jclass cls = env->GetObjectClass(activity);
+        jmethodID id = env->GetMethodID(cls, "getSafeInsets", "()[I");
+        if (id) {
+            auto arr = static_cast<jintArray>(env->CallObjectMethod(activity, id));
+            if (arr && !env->ExceptionCheck() && env->GetArrayLength(arr) == 4) {
+                jint v[4] = {};
+                env->GetIntArrayRegion(arr, 0, 4, v);
+                // Window coordinates on Android are pixels, like the insets.
+                inset_l = static_cast<float>(v[0]);
+                inset_t = static_cast<float>(v[1]);
+                inset_r = static_cast<float>(v[2]);
+                inset_b = static_cast<float>(v[3]);
+            }
+            if (arr)
+                env->DeleteLocalRef(arr);
+        }
+        if (env->ExceptionCheck())
+            env->ExceptionClear();
+        env->DeleteLocalRef(cls);
+        env->DeleteLocalRef(activity);
+#endif
+    }
+
+    // The part of the window nothing covers; all content is laid out inside it.
+    ImVec2 safe_min() const { return ImVec2(inset_l, inset_t); }
+    ImVec2 safe_max() const
+    {
+        const ImVec2 size = ImGui::GetIO().DisplaySize;
+        return ImVec2(std::max(inset_l + 1.0f, size.x - inset_r), std::max(inset_t + 1.0f, size.y - inset_b));
+    }
+    ImVec2 safe_size() const
+    {
+        const ImVec2 a = safe_min(), b = safe_max();
+        return ImVec2(b.x - a.x, b.y - a.y);
+    }
 
     ~Impl()
     {
@@ -309,19 +371,21 @@ struct Picker::Impl {
     // Scale of the whole layout: 1.0 at 1280x720.
     float ui() const
     {
-        const ImVec2 size = ImGui::GetIO().DisplaySize;
+        const ImVec2 size = safe_size();
         return std::clamp(std::min(size.x / 1280.0f, size.y / 720.0f), 0.5f, 2.5f);
     }
 
     Layout layout(int count) const
     {
         Layout l;
-        const ImVec2 size = ImGui::GetIO().DisplaySize;
+        const ImVec2 origin = safe_min();
+        const ImVec2 size = safe_size();
         const float u = l.u = ui();
         const float gap = 40.0f * u;  // generous: the covers are busy pictures
-        const float left = kMargin * u;
+        const float margin = kMargin * u;
+        const float left = origin.x + margin;
         float top = 96.0f * u;
-        const float width = size.x - 2 * left;
+        const float width = size.x - 2 * margin;
         int cols = std::max(1, count);
         auto tile_for = [&](int c) { return (width - static_cast<float>(c - 1) * gap) / static_cast<float>(c); };
         while (cols > 1 && tile_for(cols) < 130.0f * u)
@@ -335,7 +399,7 @@ struct Picker::Impl {
         l.tile_h = l.tile * kCoverAspect;
         // Centre covers + panel (about 160 px) vertically in the space between header and hints.
         const float block = static_cast<float>(rows) * (l.tile_h + kCaption * u + gap) - gap + 22.0f * u + 160.0f * u;
-        top = std::max(top, top + (size.y - 64.0f * u - top - block) / 2);
+        top = origin.y + std::max(top, top + (size.y - 64.0f * u - top - block) / 2);
         for (int i = 0; i < count; ++i) {
             const float x = left + static_cast<float>(i % cols) * (l.tile + gap);
             const float y = top + static_cast<float>(i / cols) * (l.tile_h + kCaption * u + gap);
@@ -344,7 +408,7 @@ struct Picker::Impl {
         }
         const float grid_bottom = top + static_cast<float>(rows) * (l.tile_h + kCaption * u + gap) - gap;
         l.panel_min = ImVec2(left, grid_bottom + 22.0f * u);
-        l.panel_max = ImVec2(size.x - left, size.y - 62.0f * u);
+        l.panel_max = ImVec2(origin.x + size.x - margin, origin.y + size.y - 62.0f * u);
         return l;
     }
 
@@ -437,9 +501,9 @@ struct Picker::Impl {
 
     void draw_header(ImDrawList *dl, float u)
     {
-        const ImVec2 size = ImGui::GetIO().DisplaySize;
+        const ImVec2 o = safe_min(), e = safe_max();
         // Logo: white rounded square with a play triangle, then the name.
-        const ImVec2 lmin(kMargin * u, 22.0f * u);
+        const ImVec2 lmin(o.x + kMargin * u, o.y + 22.0f * u);
         const float ls = 28.0f * u;
         dl->AddRectFilled(lmin, ImVec2(lmin.x + ls, lmin.y + ls), IM_COL32_WHITE, 7.0f * u);
         const ImVec2 c(lmin.x + ls * 0.53f, lmin.y + ls * 0.5f);
@@ -449,7 +513,7 @@ struct Picker::Impl {
 
         const std::string version = std::string("v") + kVersion;
         const ImVec2 vs = measure(font_regular, 14.0f * u, version);
-        const ImVec2 pill_max(size.x - kMargin * u, lmin.y + ls + 2.0f * u);
+        const ImVec2 pill_max(e.x - kMargin * u, lmin.y + ls + 2.0f * u);
         const ImVec2 pill_min(pill_max.x - vs.x - 28.0f * u, lmin.y - 2.0f * u);
         dl->AddRectFilled(pill_min, pill_max, rgba(255, 255, 255, 18), 999.0f);
         dl->AddRect(pill_min, pill_max, rgba(255, 255, 255, 40), 999.0f, 1.0f * u);
@@ -557,10 +621,16 @@ struct Picker::Impl {
             chip_col = rgba(240, 190, 80);
             return "This version of rsdk-air does not include the engine for this game yet.";
         }
-        chip = "Data missing";
+        const bool missing = game.reason.rfind("missing ", 0) == 0;
+        chip = missing ? "Data missing" : "Data not valid";
         chip_col = rgba(240, 190, 80);
         const std::string file(game.spec->required.front());
-        if (game.reason.rfind("missing ", 0) == 0)
+        if (importable(game)) {
+            if (missing)
+                return "Press Import and choose your own " + file + ". rsdk-air keeps a copy for the game.";
+            return game.reason + "\nPress Import to choose another file.";
+        }
+        if (missing)
             return "Copy your own " + file + " to:\n" + path_to_utf8(game.data_dir);
         return game.reason;
     }
@@ -624,8 +694,13 @@ struct Picker::Impl {
         // A game in an app that is not installed gets a "Get the app" button instead.
         const bool get_app = !game.available && !get_app_url(game).empty();
         const bool install = !game.available && installable(game);
-        const bool active = game.available || get_app || install;
-        const std::string label = game.available ? "Play" : install ? "Install" : get_app ? "Get the app" : chip;
+        const bool import_data = importable(game);
+        const bool active = game.available || get_app || install || import_data;
+        const std::string label = game.available ? "Play"
+                                  : install      ? "Install"
+                                  : import_data  ? "Import"
+                                  : get_app      ? "Get the app"
+                                                 : chip;
         dl->AddRectFilled(bmin, bmax, active ? IM_COL32_WHITE : rgba(255, 255, 255, 26), 999.0f);
         const ImVec2 ls = measure(font_bold, 19.0f * u, label);
         float lx = (bmin.x + bmax.x - ls.x) / 2;
@@ -671,9 +746,9 @@ struct Picker::Impl {
 
     void draw_hints(ImDrawList *dl, float u, bool can_play)
     {
-        const ImVec2 size = ImGui::GetIO().DisplaySize;
-        float x = size.x - kMargin * u;
-        const float y = size.y - 28.0f * u;
+        const ImVec2 e = safe_max();
+        float x = e.x - kMargin * u;
+        const float y = e.y - 28.0f * u;
         draw_hint(dl, x, y, u, nullptr, 0, "Arrows", "Navigate");
         draw_hint(dl, x, y, u, "B", rgba(240, 110, 110), "Esc", "Quit");
         if (can_play)
@@ -689,7 +764,8 @@ struct Picker::Impl {
         const ImVec2 size = ImGui::GetIO().DisplaySize;
         dl->AddRectFilled(ImVec2(0, 0), size, rgba(5, 5, 10, static_cast<int>(170 * confirm_anim)));
         const ImVec2 half(220.0f * u, 95.0f * u);
-        const ImVec2 c(size.x / 2, size.y / 2 + (1.0f - confirm_anim) * 20.0f * u);
+        const ImVec2 o = safe_min(), e = safe_max();
+        const ImVec2 c((o.x + e.x) / 2, (o.y + e.y) / 2 + (1.0f - confirm_anim) * 20.0f * u);
         const ImVec2 min(c.x - half.x, c.y - half.y), max(c.x + half.x, c.y + half.y);
         dl->AddRectFilled(min, max, with_alpha(rgba(28, 27, 38), confirm_anim), 22.0f * u);
         dl->AddRect(min, max, with_alpha(rgba(255, 255, 255, 30), confirm_anim), 22.0f * u, 1.0f * u);
@@ -779,8 +855,15 @@ bool Picker::open(std::string &error)
 {
     Impl &s = *impl_;
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
+#if defined(__ANDROID__)
+    // Fullscreen hides the status and navigation bars (immersive mode). Without it they
+    // stay on screen over the picker: with targetSdk 35 the app draws edge to edge.
+    const Uint32 window_flags = SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_ALLOW_HIGHDPI;
+#else
+    const Uint32 window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
+#endif
     s.window = SDL_CreateWindow("rsdk-air", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720,
-                                SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+                                window_flags);
     if (!s.window) {
         error = std::string("cannot create the window: ") + SDL_GetError();
         return false;
@@ -811,6 +894,7 @@ bool Picker::open(std::string &error)
     if (!s.font_bold)
         s.font_bold = s.font_regular;
     s.load_covers();
+    s.update_insets();
 
     for (int i = 0; i < SDL_NumJoysticks(); ++i) {
         if (SDL_IsGameController(i)) {
@@ -891,6 +975,8 @@ int Picker::choose(const std::vector<GameStatus> &games)
                     chosen = s.focus;
                 else if (installable(game))
                     chosen = kInstallBase - s.focus;
+                else if (importable(game))
+                    chosen = kImportBase - s.focus;
                 else if (const std::string url = get_app_url(game); !url.empty())
                     SDL_OpenURL(url.c_str());
             } else {
@@ -906,6 +992,7 @@ int Picker::choose(const std::vector<GameStatus> &games)
             ImGui_ImplSDL2_ProcessEvent(&event);
             switch (event.type) {
             case SDL_QUIT: return -1;
+            case SDL_WINDOWEVENT: s.update_insets(); break;  // rotation, bars shown or hidden
             case SDL_KEYDOWN: act(Impl::key_action(event.key.keysym.sym)); break;
             case SDL_CONTROLLERBUTTONDOWN: act(Impl::pad_action(event.cbutton.button)); break;
             case SDL_CONTROLLERDEVICEADDED:
@@ -990,7 +1077,8 @@ int Picker::choose(const std::vector<GameStatus> &games)
         s.draw_tile(dl, l, games[static_cast<std::size_t>(s.focus)], s.focus, dt);  // on top
         s.draw_details(dl, l, games[static_cast<std::size_t>(s.focus)], play_min, play_max);
         const GameStatus &focused = games[static_cast<std::size_t>(s.focus)];
-        s.draw_hints(dl, u, focused.available || installable(focused) || !get_app_url(focused).empty());
+        s.draw_hints(dl, u, focused.available || installable(focused) || importable(focused) ||
+                                   !get_app_url(focused).empty());
         s.draw_confirm(ImGui::GetForegroundDrawList(), u, dt, confirm_rects);
         ImGui::Render();
 
@@ -1033,12 +1121,12 @@ void Picker::busy(const std::string &title, const std::function<std::string()> &
         ImGui::NewFrame();
         ImDrawList *dl = ImGui::GetBackgroundDrawList();
         const float u = s.ui();
-        const ImVec2 size = ImGui::GetIO().DisplaySize;
         s.draw_backdrop(dl, dt);
         s.draw_header(dl, u);
 
         const ImVec2 half(270.0f * u, 92.0f * u);
-        const ImVec2 c(size.x / 2, size.y / 2);
+        const ImVec2 o = s.safe_min(), e = s.safe_max();
+        const ImVec2 c((o.x + e.x) / 2, (o.y + e.y) / 2);
         const ImVec2 min(c.x - half.x, c.y - half.y), max(c.x + half.x, c.y + half.y);
         dl->AddRectFilled(min, max, rgba(28, 27, 38, 245), 22.0f * u);
         dl->AddRect(min, max, rgba(255, 255, 255, 30), 22.0f * u, 1.0f * u);
