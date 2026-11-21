@@ -368,11 +368,14 @@ struct Picker::Impl {
     static constexpr float kCaption = 52.0f;
     static constexpr float kCoverAspect = 1.25f;  // height / width: 4:5, a little taller than wide, like a box  // title + year under a cover, at u = 1
 
-    // Scale of the whole layout: 1.0 at 1280x720.
+    // Scale of the whole layout: 1.0 at 1280x720, or at 720x1280 when upright, so a phone
+    // shows text and buttons at the same size in both orientations.
     float ui() const
     {
         const ImVec2 size = safe_size();
-        return std::clamp(std::min(size.x / 1280.0f, size.y / 720.0f), 0.5f, 2.5f);
+        const float scale = size.y > size.x ? std::min(size.x / 720.0f, size.y / 1280.0f)
+                                            : std::min(size.x / 1280.0f, size.y / 720.0f);
+        return std::clamp(scale, 0.5f, 2.5f);
     }
 
     Layout layout(int count) const
@@ -386,7 +389,9 @@ struct Picker::Impl {
         const float left = origin.x + margin;
         float top = 96.0f * u;
         const float width = size.x - 2 * margin;
-        int cols = std::max(1, count);
+        // Portrait (a phone held upright): two covers per row, 2 + 2 + 1 for five games.
+        const bool portrait = size.y > size.x;
+        int cols = portrait ? std::min(2, std::max(1, count)) : std::max(1, count);
         auto tile_for = [&](int c) { return (width - static_cast<float>(c - 1) * gap) / static_cast<float>(c); };
         while (cols > 1 && tile_for(cols) < 130.0f * u)
             --cols;
@@ -395,13 +400,21 @@ struct Picker::Impl {
         const float room = size.y - top - 64.0f * u - 200.0f * u;
         const float by_height =
             (room - static_cast<float>(rows) * (kCaption * u + gap)) / static_cast<float>(rows) / kCoverAspect;
-        l.tile = std::max(64.0f * u, std::min({tile_for(cols), by_height, 240.0f * u}));
+        // In portrait the covers may grow to fill the width; in landscape they stop at 240.
+        const float cap = portrait ? tile_for(cols) : 240.0f * u;
+        l.tile = std::max(64.0f * u, std::min({tile_for(cols), by_height, cap}));
         l.tile_h = l.tile * kCoverAspect;
         // Centre covers + panel (about 160 px) vertically in the space between header and hints.
         const float block = static_cast<float>(rows) * (l.tile_h + kCaption * u + gap) - gap + 22.0f * u + 160.0f * u;
         top = origin.y + std::max(top, top + (size.y - 64.0f * u - top - block) / 2);
         for (int i = 0; i < count; ++i) {
-            const float x = left + static_cast<float>(i % cols) * (l.tile + gap);
+            float x = left + static_cast<float>(i % cols) * (l.tile + gap);
+            if (portrait) {
+                // Centre each row, so the last, shorter one sits in the middle.
+                const int in_row = std::min(cols, count - (i / cols) * cols);
+                const float row_w = static_cast<float>(in_row) * l.tile + static_cast<float>(in_row - 1) * gap;
+                x += (width - row_w) / 2;
+            }
             const float y = top + static_cast<float>(i / cols) * (l.tile_h + kCaption * u + gap);
             l.min.emplace_back(x, y);
             l.max.emplace_back(x + l.tile, y + l.tile_h);
@@ -1030,8 +1043,12 @@ int Picker::choose(const std::vector<GameStatus> &games)
                 }
                 const int tile = s.tile_at(p, count);
                 if (tile >= 0) {
+#if !defined(__ANDROID__)
+                    // Desktop: a click on the focused cover (or a double click) plays it.
+                    // Android: a tap only selects; the game starts from the Play button.
                     if (tile == s.focus || event.button.clicks >= 2)
                         act(Action::Accept);
+#endif
                     s.set_focus(tile, count);
                 }
                 break;

@@ -4,8 +4,9 @@
 // catalog with what detect_games() found and returns the player's choice.
 //
 // Input (engine-specs UX.md): arrows / d-pad / left stick move the focus, A / Enter / Space
-// plays, B / Escape asks whether to quit (No focused). Mouse and touch: a tap focuses a
-// cover, a tap on the focused cover (or on Play) plays it.
+// plays, B / Escape asks whether to quit (No focused). Mouse: a click focuses a cover, a
+// click on the focused cover (or on Play) plays it. Android: a tap only focuses a cover;
+// the game starts from the Play button (or A / Enter).
 //
 // Art comes from <resources>/art/covers/<id>.jpg and fonts from <resources>/fonts/; any
 // missing file falls back to neutral art and Dear ImGui's built-in font.
