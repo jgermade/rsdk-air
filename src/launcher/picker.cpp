@@ -150,8 +150,11 @@ struct Cover {
 // edge) to 1 (keep the right edge). Centred unless the art needs otherwise.
 float cover_anchor_x(std::string_view id)
 {
+    // At 4:5 the crop keeps 80% of a square cover's width.
     if (id == "soniccd")
-        return 1.0f;  // the CD sits on the right edge
+        return 0.93f;  // the disc (x 367-500 of 512) ends 5 px from the right, as from the bottom
+    if (id == "s3air")
+        return 0.9f;   // keeps Robotnik's Egg Mobile (x 419-488 of 512) whole
     return 0.5f;
 }
 
