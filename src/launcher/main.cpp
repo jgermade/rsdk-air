@@ -368,6 +368,97 @@ void install_game(Picker &picker, const GameSpec &game, const fs::path &root)
 #endif
 }
 
+#if defined(__ANDROID__)
+// State of an import in LauncherActivity: {state, bytes copied, total bytes (-1 unknown)}.
+// States match LauncherActivity.IMPORT_*.
+enum ImportState { kImportIdle = 0, kImportRunning = 1, kImportDone = 2, kImportCancelled = 3, kImportFailed = 4 };
+
+struct ImportStatus {
+    long long state = kImportFailed, done = 0, total = -1;
+    std::string error;
+};
+
+ImportStatus import_status()
+{
+    ImportStatus status;
+    auto *env = static_cast<JNIEnv *>(SDL_AndroidGetJNIEnv());
+    auto activity = static_cast<jobject>(SDL_AndroidGetActivity());
+    if (!env || !activity) {
+        status.error = "no Android activity";
+        return status;
+    }
+    jclass cls = env->GetObjectClass(activity);
+    if (jmethodID id = env->GetMethodID(cls, "getImportStatus", "()[J")) {
+        auto arr = static_cast<jlongArray>(env->CallObjectMethod(activity, id));
+        if (arr && !env->ExceptionCheck() && env->GetArrayLength(arr) == 3) {
+            jlong v[3] = {};
+            env->GetLongArrayRegion(arr, 0, 3, v);
+            status.state = v[0];
+            status.done = v[1];
+            status.total = v[2];
+        }
+        if (arr)
+            env->DeleteLocalRef(arr);
+    }
+    if (jmethodID id = env->GetMethodID(cls, "getImportError", "()Ljava/lang/String;")) {
+        auto str = static_cast<jstring>(env->CallObjectMethod(activity, id));
+        if (str && !env->ExceptionCheck()) {
+            const char *chars = env->GetStringUTFChars(str, nullptr);
+            status.error = chars ? chars : "";
+            if (chars)
+                env->ReleaseStringUTFChars(str, chars);
+        }
+        if (str)
+            env->DeleteLocalRef(str);
+    }
+    if (env->ExceptionCheck())
+        env->ExceptionClear();
+    env->DeleteLocalRef(cls);
+    env->DeleteLocalRef(activity);
+    return status;
+}
+#endif
+
+// Android: lets the player pick their own data file with the system file picker and copies
+// it into the game's data folder (private to the app, so there is no other way in).
+void import_game_data(Picker &picker, const GameSpec &game, const fs::path &root)
+{
+#if defined(__ANDROID__)
+    const std::string file(game.required.front());
+    const fs::path dest = game_data_dir(root, game) / path_from_utf8(file);
+    if (!call_activity("importFile", "(Ljava/lang/String;)Z", {path_to_utf8(dest)})) {
+        show_error(std::string(game.title), "Cannot open the file picker.");
+        return;
+    }
+    // The file picker is another activity: SDL blocks in its event loop while it is open,
+    // and LauncherActivity copies the chosen file on its own thread.
+    ImportStatus status = import_status();
+    picker.busy(
+        "Importing " + file,
+        [&]() -> std::string {
+            if (status.done <= 0)
+                return "Choose your " + file + " for " + std::string(game.title) + ".";
+            char text[64];
+            std::snprintf(text, sizeof(text), "Copying: %.1f MB", static_cast<double>(status.done) / 1e6);
+            return text;
+        },
+        [&]() -> float {
+            return status.total > 0 ? static_cast<float>(status.done) / static_cast<float>(status.total) : -1.0f;
+        },
+        [&] {
+            status = import_status();
+            return status.state != kImportRunning;
+        });
+    picker.resume();  // input from the file picker must not reach the picker
+    if (status.state == kImportFailed)
+        show_error(std::string(game.title), "Could not import the file: " + status.error);
+#else
+    (void)picker;
+    (void)game;
+    (void)root;
+#endif
+}
+
 int run_picker(const fs::path &root)
 {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMECONTROLLER) != 0) {
@@ -388,6 +479,10 @@ int run_picker(const fs::path &root)
     for (;;) {
         const std::vector<GameStatus> games = detect_games(root, platform_probe(root));  // again after each game
         const int choice = picker.choose(games);
+        if (choice <= Picker::kImportBase) {
+            import_game_data(picker, *games[static_cast<std::size_t>(Picker::kImportBase - choice)].spec, root);
+            continue;
+        }
         if (choice <= Picker::kInstallBase) {
             install_game(picker, *games[static_cast<std::size_t>(Picker::kInstallBase - choice)].spec, root);
             continue;

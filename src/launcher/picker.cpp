@@ -205,6 +205,18 @@ bool installable(const GameStatus &game)
 #endif
 }
 
+// A game whose data the player can import with the system file picker (Android only: the
+// data folder is private to the app, so there is no other way to put files there).
+bool importable(const GameStatus &game)
+{
+#if defined(__ANDROID__)
+    return game.engine_found && !game.available;
+#else
+    (void)game;
+    return false;
+#endif
+}
+
 enum class Action { None, Left, Right, Up, Down, Accept, Back };
 
 } // namespace
@@ -609,10 +621,16 @@ struct Picker::Impl {
             chip_col = rgba(240, 190, 80);
             return "This version of rsdk-air does not include the engine for this game yet.";
         }
-        chip = "Data missing";
+        const bool missing = game.reason.rfind("missing ", 0) == 0;
+        chip = missing ? "Data missing" : "Data not valid";
         chip_col = rgba(240, 190, 80);
         const std::string file(game.spec->required.front());
-        if (game.reason.rfind("missing ", 0) == 0)
+        if (importable(game)) {
+            if (missing)
+                return "Press Import and choose your own " + file + ". rsdk-air keeps a copy for the game.";
+            return game.reason + "\nPress Import to choose another file.";
+        }
+        if (missing)
             return "Copy your own " + file + " to:\n" + path_to_utf8(game.data_dir);
         return game.reason;
     }
@@ -676,8 +694,13 @@ struct Picker::Impl {
         // A game in an app that is not installed gets a "Get the app" button instead.
         const bool get_app = !game.available && !get_app_url(game).empty();
         const bool install = !game.available && installable(game);
-        const bool active = game.available || get_app || install;
-        const std::string label = game.available ? "Play" : install ? "Install" : get_app ? "Get the app" : chip;
+        const bool import_data = importable(game);
+        const bool active = game.available || get_app || install || import_data;
+        const std::string label = game.available ? "Play"
+                                  : install      ? "Install"
+                                  : import_data  ? "Import"
+                                  : get_app      ? "Get the app"
+                                                 : chip;
         dl->AddRectFilled(bmin, bmax, active ? IM_COL32_WHITE : rgba(255, 255, 255, 26), 999.0f);
         const ImVec2 ls = measure(font_bold, 19.0f * u, label);
         float lx = (bmin.x + bmax.x - ls.x) / 2;
@@ -952,6 +975,8 @@ int Picker::choose(const std::vector<GameStatus> &games)
                     chosen = s.focus;
                 else if (installable(game))
                     chosen = kInstallBase - s.focus;
+                else if (importable(game))
+                    chosen = kImportBase - s.focus;
                 else if (const std::string url = get_app_url(game); !url.empty())
                     SDL_OpenURL(url.c_str());
             } else {
@@ -1052,7 +1077,8 @@ int Picker::choose(const std::vector<GameStatus> &games)
         s.draw_tile(dl, l, games[static_cast<std::size_t>(s.focus)], s.focus, dt);  // on top
         s.draw_details(dl, l, games[static_cast<std::size_t>(s.focus)], play_min, play_max);
         const GameStatus &focused = games[static_cast<std::size_t>(s.focus)];
-        s.draw_hints(dl, u, focused.available || installable(focused) || !get_app_url(focused).empty());
+        s.draw_hints(dl, u, focused.available || installable(focused) || importable(focused) ||
+                                   !get_app_url(focused).empty());
         s.draw_confirm(ImGui::GetForegroundDrawList(), u, dt, confirm_rects);
         ImGui::Render();
 

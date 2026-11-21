@@ -31,10 +31,12 @@ public:
     bool open(std::string &error);
 
     static constexpr int kQuit = -1;
-    static constexpr int kInstallBase = -100;  // kInstallBase - i: install game i first
+    static constexpr int kInstallBase = -100;   // kInstallBase - i: install game i first
+    static constexpr int kImportBase = -1000;   // kImportBase - i: import game i's data (Android)
 
     // Shows `games` until the player picks an available one (returns its index), asks to
-    // install one (returns kInstallBase - index; Sonic 3 A.I.R. on desktop) or quits
+    // install one (returns kInstallBase - index; Sonic 3 A.I.R. on desktop), asks to import one's
+    // data (returns kImportBase - index; Android) or quits
     // (returns kQuit). The focus is kept between calls.
     int choose(const std::vector<GameStatus> &games);
 
