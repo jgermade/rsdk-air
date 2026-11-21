@@ -51,7 +51,7 @@ bool supported(const char *id)
 
 } // namespace
 
-// Where InitUserDirectory points the engine on macOS (patched UserStorage.cpp).
+// Where InitUserDirectory points the engine on macOS and Android (patched UserStorage.cpp).
 const char *rsdkair_rsdkv5_user_dir() { return g_user_dir.c_str(); }
 
 extern "C" {
@@ -97,7 +97,7 @@ RSDKAIR_EXPORT int rsdkair_engine_main(const RsdkAirEngineArgs *args)
     }
 
     // Linux ("./") and Windows ("") resolve the user file directory against the working
-    // directory; macOS gets the folder itself.
+    // directory; macOS and Android get the folder itself (patched UserStorage.cpp).
     g_user_dir = rsdkair::path_to_utf8(save_dir) + "/";
     fs::current_path(save_dir, ec);
     if (ec) {

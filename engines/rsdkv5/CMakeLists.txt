@@ -21,7 +21,10 @@ endif()
 # --- patches ------------------------------------------------------------------------
 # InitUserDirectory: on macOS upstream uses <app resources>/RSDKv5/; here the module's
 # save folder (rsdkair_rsdkv5_user_dir, rsdkv5_module.cpp). Linux and Windows already use
-# the working directory, which the module sets to the save folder.
+# the working directory, which the module sets to the save folder. Android (built as
+# Linux) gets the absolute folder too: the engine opens files with SDL_RWFromFile, and SDL
+# on Android resolves relative paths against the app's internal storage, not the working
+# directory, so "./" + "../../games/mania/Data.rsdk" pointed outside the data root.
 rsdkair_patch_begin(storage "${UP}/RSDKv5/RSDK/User/Core/UserStorage.cpp")
 rsdkair_patch_replace(storage [=[void RSDK::SKU::InitUserDirectory()]=]
 [=[const char *rsdkair_rsdkv5_user_dir(); // rsdk-air: rsdkv5_module.cpp
@@ -29,6 +32,12 @@ rsdkair_patch_replace(storage [=[void RSDK::SKU::InitUserDirectory()]=]
 void RSDK::SKU::InitUserDirectory()]=])
 rsdkair_patch_replace(storage [=[    sprintf_s(buffer, sizeof(buffer), "%s/RSDKv5/", getResourcesPath());]=]
 [=[    sprintf_s(buffer, sizeof(buffer), "%s", rsdkair_rsdkv5_user_dir()); // rsdk-air]=])
+rsdkair_patch_replace(storage [=[    SKU::SetUserFileCallbacks("./", NULL, NULL);]=]
+[=[#if defined(RSDKAIR_ANDROID_AS_LINUX) // rsdk-air: SDL reads relative paths from internal storage
+    SKU::SetUserFileCallbacks(rsdkair_rsdkv5_user_dir(), NULL, NULL);
+#else
+    SKU::SetUserFileCallbacks("./", NULL, NULL);
+#endif]=])
 rsdkair_patch_end(storage RSDKV5_USERSTORAGE_CPP)
 
 # RetroEngine.hpp (Android only): pick the Linux platform instead of Android, so the SDL2
