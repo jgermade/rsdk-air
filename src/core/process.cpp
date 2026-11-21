@@ -40,11 +40,14 @@ std::string quote_windows_arg(const std::string &arg)
     return quoted;
 }
 
-int run_child(const std::filesystem::path &exe, const std::vector<std::string> &args, std::string &error)
+int run_child(const std::filesystem::path &exe, const std::vector<std::string> &args, std::string &error,
+              const std::filesystem::path &cwd, bool search_path)
 {
 #if defined(__ANDROID__)
     (void)exe;
     (void)args;
+    (void)cwd;
+    (void)search_path;
     error = "child processes are not used on Android";
     return -1;
 #elif defined(_WIN32)
@@ -59,7 +62,9 @@ int run_child(const std::filesystem::path &exe, const std::vector<std::string> &
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
     PROCESS_INFORMATION process{};
-    if (!CreateProcessW(exe.c_str(), wide.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startup, &process)) {
+    // Without an application name, CreateProcessW finds the program like a shell would.
+    if (!CreateProcessW(search_path ? nullptr : exe.c_str(), wide.data(), nullptr, nullptr, FALSE, 0, nullptr,
+                        cwd.empty() ? nullptr : cwd.c_str(), &startup, &process)) {
         error = "cannot start " + path_to_utf8(exe) + " (error " + std::to_string(GetLastError()) + ")";
         return -1;
     }
@@ -79,8 +84,16 @@ int run_child(const std::filesystem::path &exe, const std::vector<std::string> &
         argv.push_back(arg.data());
     argv.push_back(nullptr);
 
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    const std::string cwd_utf8 = path_to_utf8(cwd);
+    if (!cwd.empty())
+        posix_spawn_file_actions_addchdir_np(&actions, cwd_utf8.c_str());  // glibc 2.29+, macOS 10.15+
     pid_t pid = 0;
-    const int spawn_error = posix_spawn(&pid, exe_utf8.c_str(), nullptr, nullptr, argv.data(), environ);
+    const int spawn_error = search_path
+        ? posix_spawnp(&pid, exe_utf8.c_str(), &actions, nullptr, argv.data(), environ)
+        : posix_spawn(&pid, exe_utf8.c_str(), &actions, nullptr, argv.data(), environ);
+    posix_spawn_file_actions_destroy(&actions);
     if (spawn_error != 0) {
         error = "cannot start " + exe_utf8 + ": " + std::strerror(spawn_error);
         return -1;

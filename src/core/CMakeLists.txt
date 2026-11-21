@@ -16,7 +16,9 @@ add_library(rsdkair_core STATIC
     process.cpp
     rom.cpp
     run_engine.cpp
-    saves_rsdkv4.cpp)
+    s3air.cpp
+    saves_rsdkv4.cpp
+    sha256.cpp)
 target_include_directories(rsdkair_core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CMAKE_CURRENT_BINARY_DIR}/generated")

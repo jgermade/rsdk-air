@@ -39,7 +39,7 @@ content. Only for builds you keep for yourself: never distribute them.
 | Path | What |
 | --- | --- |
 | `include/rsdkair/engine.h` | The C ABI every engine module exports |
-| `src/core/` | Launcher logic without SDL: game catalog, data detection, ROM checks, module loading, child processes |
+| `src/core/` | Launcher logic without SDL: game catalog, data detection, ROM checks, module loading, child processes, Sonic 3 A.I.R. installer (`s3air.cpp`) |
 | `src/launcher/` | The `rsdk-air` executable (`libmain.so` on Android), with the cover-mosaic picker (Dear ImGui) |
 | `art/` | Picker covers, with their provenance in `art/README.md`; removable, the picker falls back to neutral art |
 | `assets/fonts/` | Inter (SIL OFL 1.1), the picker's font |

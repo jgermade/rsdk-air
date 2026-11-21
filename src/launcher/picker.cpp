@@ -1,6 +1,7 @@
 #include "picker.hpp"
 
 #include <rsdkair/paths.hpp>
+#include <rsdkair/s3air.hpp>
 #include <rsdkair/version.hpp>
 
 #include <SDL.h>
@@ -186,6 +187,18 @@ std::string get_app_url(const GameStatus &game)
     (void)game;
 #endif
     return {};
+}
+
+// A game rsdk-air can install for the player: Sonic 3 A.I.R. on desktop, from its official
+// release (src/core/s3air.cpp).
+bool installable(const GameStatus &game)
+{
+#if defined(__ANDROID__)
+    (void)game;
+    return false;
+#else
+    return game.spec->module == "sonic3air" && !game.engine_found && s3air_package() != nullptr;
+#endif
 }
 
 enum class Action { None, Left, Right, Up, Down, Accept, Back };
@@ -526,6 +539,14 @@ struct Picker::Impl {
             chip_col = rgba(80, 220, 140);
             return "Your game data was found. Press Play to start.";
         }
+        if (installable(game)) {
+            chip = "Not installed";
+            chip_col = rgba(240, 190, 80);
+            const S3airPackage &package = *s3air_package();
+            return "Sonic 3 A.I.R. runs as its own program. rsdk-air can install the official version " +
+                   std::string(package.version) + " for you from its GitHub releases (" +
+                   std::to_string(package.size / 1000000) + " MB). Your ROM stays where it is.";
+        }
         if (!get_app_url(game).empty()) {
             chip = "App not installed";
             chip_col = rgba(240, 190, 80);
@@ -582,7 +603,7 @@ struct Picker::Impl {
         y += 28.0f * u;
         text(dl, font_bold, title_size, ImVec2(min.x + pad, y), IM_COL32_WHITE, title, text_w);
         y += title_h + 8.0f * u;
-        text(dl, font_regular, 16.0f * u, ImVec2(min.x + pad, y), rgba(200, 200, 212), line, min.x + pad + text_w);
+        text(dl, font_regular, 16.0f * u, ImVec2(min.x + pad, y), rgba(200, 200, 212), line, text_w);
 
         // Right: chips (year, status) and the Play button.
         const float rx = max.x - pad - right_w;
@@ -602,8 +623,9 @@ struct Picker::Impl {
         const ImVec2 bmin(rx, y + 28.0f * u + 18.0f * u), bmax(rx + std::min(right_w, 190.0f * u), bmin.y + 52.0f * u);
         // A game in an app that is not installed gets a "Get the app" button instead.
         const bool get_app = !game.available && !get_app_url(game).empty();
-        const bool active = game.available || get_app;
-        const std::string label = game.available ? "Play" : get_app ? "Get the app" : chip;
+        const bool install = !game.available && installable(game);
+        const bool active = game.available || get_app || install;
+        const std::string label = game.available ? "Play" : install ? "Install" : get_app ? "Get the app" : chip;
         dl->AddRectFilled(bmin, bmax, active ? IM_COL32_WHITE : rgba(255, 255, 255, 26), 999.0f);
         const ImVec2 ls = measure(font_bold, 19.0f * u, label);
         float lx = (bmin.x + bmax.x - ls.x) / 2;
@@ -867,6 +889,8 @@ int Picker::choose(const std::vector<GameStatus> &games)
                 const GameStatus &game = games[static_cast<std::size_t>(s.focus)];
                 if (game.available)
                     chosen = s.focus;
+                else if (installable(game))
+                    chosen = kInstallBase - s.focus;
                 else if (const std::string url = get_app_url(game); !url.empty())
                     SDL_OpenURL(url.c_str());
             } else {
@@ -966,7 +990,7 @@ int Picker::choose(const std::vector<GameStatus> &games)
         s.draw_tile(dl, l, games[static_cast<std::size_t>(s.focus)], s.focus, dt);  // on top
         s.draw_details(dl, l, games[static_cast<std::size_t>(s.focus)], play_min, play_max);
         const GameStatus &focused = games[static_cast<std::size_t>(s.focus)];
-        s.draw_hints(dl, u, focused.available || !get_app_url(focused).empty());
+        s.draw_hints(dl, u, focused.available || installable(focused) || !get_app_url(focused).empty());
         s.draw_confirm(ImGui::GetForegroundDrawList(), u, dt, confirm_rects);
         ImGui::Render();
 
@@ -982,6 +1006,67 @@ int Picker::choose(const std::vector<GameStatus> &games)
         if (settled && s.pads.empty())
             SDL_WaitEventTimeout(nullptr, 500);
     }
+}
+
+} // namespace rsdkair
+
+namespace rsdkair {
+
+void Picker::busy(const std::string &title, const std::function<std::string()> &status,
+                  const std::function<float()> &progress, const std::function<bool()> &done)
+{
+    Impl &s = *impl_;
+    Uint64 last = SDL_GetPerformanceCounter();
+    float sweep = 0.0f;  // position of the indeterminate bar
+    while (!done()) {
+        SDL_Event event;
+        while (SDL_PollEvent(&event))
+            ImGui_ImplSDL2_ProcessEvent(&event);  // keeps the window responsive; input is ignored
+
+        const Uint64 now = SDL_GetPerformanceCounter();
+        const float dt = std::min(0.1f, static_cast<float>(now - last) / static_cast<float>(SDL_GetPerformanceFrequency()));
+        last = now;
+        sweep = std::fmod(sweep + dt * 0.6f, 1.0f);
+
+        ImGui_ImplSDLRenderer2_NewFrame();
+        ImGui_ImplSDL2_NewFrame();
+        ImGui::NewFrame();
+        ImDrawList *dl = ImGui::GetBackgroundDrawList();
+        const float u = s.ui();
+        const ImVec2 size = ImGui::GetIO().DisplaySize;
+        s.draw_backdrop(dl, dt);
+        s.draw_header(dl, u);
+
+        const ImVec2 half(270.0f * u, 92.0f * u);
+        const ImVec2 c(size.x / 2, size.y / 2);
+        const ImVec2 min(c.x - half.x, c.y - half.y), max(c.x + half.x, c.y + half.y);
+        dl->AddRectFilled(min, max, rgba(28, 27, 38, 245), 22.0f * u);
+        dl->AddRect(min, max, rgba(255, 255, 255, 30), 22.0f * u, 1.0f * u);
+        const float pad = 28.0f * u;
+        s.text(dl, s.font_bold, 22.0f * u, ImVec2(min.x + pad, min.y + pad), IM_COL32_WHITE, title);
+        s.text(dl, s.font_regular, 15.0f * u, ImVec2(min.x + pad, min.y + pad + 38.0f * u), rgba(200, 200, 212),
+               status(), max.x - pad);
+
+        const ImVec2 bmin(min.x + pad, max.y - pad - 10.0f * u), bmax(max.x - pad, max.y - pad);
+        dl->AddRectFilled(bmin, bmax, rgba(255, 255, 255, 26), 999.0f);
+        const float fraction = progress();
+        const float w = bmax.x - bmin.x;
+        if (fraction >= 0.0f) {
+            dl->AddRectFilled(bmin, ImVec2(bmin.x + w * std::clamp(fraction, 0.02f, 1.0f), bmax.y), IM_COL32_WHITE,
+                              999.0f);
+        } else {
+            const float x0 = bmin.x + (w * 1.3f) * sweep - w * 0.3f;
+            dl->AddRectFilled(ImVec2(std::max(bmin.x, x0), bmin.y), ImVec2(std::min(bmax.x, x0 + w * 0.3f), bmax.y),
+                              IM_COL32_WHITE, 999.0f);
+        }
+        ImGui::Render();
+        SDL_SetRenderDrawColor(s.renderer, 14, 13, 20, 255);
+        SDL_RenderClear(s.renderer);
+        ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), s.renderer);
+        SDL_RenderPresent(s.renderer);
+    }
+    SDL_FlushEvents(SDL_KEYDOWN, SDL_MOUSEWHEEL);  // presses made while busy do not count
+    SDL_FlushEvents(SDL_CONTROLLERAXISMOTION, SDL_CONTROLLERBUTTONUP);
 }
 
 } // namespace rsdkair

@@ -13,6 +13,7 @@
 
 #include <rsdkair/detect.hpp>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -29,9 +30,18 @@ public:
     // Opens the window. False (with error set) if no window or renderer can be created.
     bool open(std::string &error);
 
-    // Shows `games` until the player picks an available one (returns its index) or quits
-    // (returns -1). The focus is kept between calls.
+    static constexpr int kQuit = -1;
+    static constexpr int kInstallBase = -100;  // kInstallBase - i: install game i first
+
+    // Shows `games` until the player picks an available one (returns its index), asks to
+    // install one (returns kInstallBase - index; Sonic 3 A.I.R. on desktop) or quits
+    // (returns kQuit). The focus is kept between calls.
     int choose(const std::vector<GameStatus> &games);
+
+    // Shows a progress dialog over the picker until done() is true. status() gives the
+    // line of text, progress() a fraction (negative: unknown). Polled every frame.
+    void busy(const std::string &title, const std::function<std::string()> &status,
+              const std::function<float()> &progress, const std::function<bool()> &done);
 
     // Hides the window while a game runs, and brings it back afterwards.
     void suspend();

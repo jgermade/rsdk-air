@@ -12,7 +12,7 @@ if(TARGET rsdkv4)
     add_test(NAME rsdkv4_module COMMAND rsdkair_tests rsdkv4_module)
 endif()
 
-foreach(name catalog cli rom detect detect_engines windows_quoting module_hidden_symbols run_engine run_engine_errors child_process
+foreach(name catalog cli rom detect detect_engines sha256 s3air windows_quoting module_hidden_symbols run_engine run_engine_errors child_process
         ini saves_rsdkv4)
     add_test(NAME ${name} COMMAND rsdkair_tests ${name})
 endforeach()
@@ -25,17 +25,16 @@ set(empty_root "${CMAKE_CURRENT_BINARY_DIR}/empty-root")
 add_test(NAME launcher_list COMMAND rsdk-air --list --data-root "${empty_root}")
 set_tests_properties(launcher_list PROPERTIES PASS_REGULAR_EXPRESSION "sonic1 +Sonic the Hedgehog +not available")
 
-# Sonic 3 A.I.R.'s ROM is there, but no build includes the sonic3air engine yet.
-set(nomod_root "${CMAKE_CURRENT_BINARY_DIR}/no-engine-root")
-file(WRITE "${nomod_root}/games/s3air/Sonic_Knuckles_wSonic3.bin" "not a real ROM")
-if(NOT TARGET sonic3air)
-    add_test(NAME launcher_list_no_engine COMMAND rsdk-air --list --data-root "${nomod_root}")
-    set_tests_properties(launcher_list_no_engine PROPERTIES
-        PASS_REGULAR_EXPRESSION "s3air +Sonic 3 A.I.R. +not available: this build of rsdk-air does not include the sonic3air engine")
-    add_test(NAME launcher_game_no_engine COMMAND rsdk-air --game s3air --data-root "${nomod_root}")
-    set_tests_properties(launcher_game_no_engine PROPERTIES
-        ENVIRONMENT "SDL_VIDEODRIVER=dummy" WILL_FAIL ON)
-endif()
+# Sonic 3 A.I.R.'s ROM is there, but its official build is not installed: --list says so
+# (or that there is no official build for this system), and --game fails.
+set(s3air_root "${CMAKE_CURRENT_BINARY_DIR}/s3air-root")
+file(WRITE "${s3air_root}/games/s3air/Sonic_Knuckles_wSonic3.bin" "not a real ROM")
+add_test(NAME launcher_list_s3air_not_installed COMMAND rsdk-air --list --data-root "${s3air_root}")
+set_tests_properties(launcher_list_s3air_not_installed PROPERTIES
+    PASS_REGULAR_EXPRESSION "s3air +Sonic 3 A.I.R. +not available: (Sonic 3 A.I.R. is not installed|there is no official Sonic 3 A.I.R. build)")
+add_test(NAME launcher_game_s3air_not_installed COMMAND rsdk-air --game s3air --data-root "${s3air_root}")
+set_tests_properties(launcher_game_s3air_not_installed PROPERTIES
+    ENVIRONMENT "SDL_VIDEODRIVER=dummy" WILL_FAIL ON)
 
 add_test(NAME launcher_bad_args COMMAND rsdk-air --nope)
 set_tests_properties(launcher_bad_args PROPERTIES WILL_FAIL ON)
