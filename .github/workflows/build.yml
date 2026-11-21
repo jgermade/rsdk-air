@@ -1,12 +1,15 @@
 # Tests and builds rsdk-air for Windows, Linux, macOS and Android.
 #
 # Runs on every push to main (there is no pull_request trigger on purpose) and is called
-# by release.yml with the release version. See ROADMAP/2026-11-20/upstreams-and-licensing.md.
+# by release.yml with the release version. Can also be run by hand on any branch, e.g. a
+# pull request's, which only people with write access can do (Plus always off then).
+# See ROADMAP/2026-11-20/upstreams-and-licensing.md.
 name: build
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
   workflow_call:
     inputs:
       version:
