@@ -45,7 +45,7 @@ content. Only for builds you keep for yourself: never distribute them.
 | `android/` | Gradle project: `LauncherActivity` + `GameActivity` in a `:game` process |
 | `third_party/` | SDL2 and the engines, as pinned git submodules |
 | `site/` | Landing page, deployed by `release.yml` |
-| `.github/workflows/` | `build.yml` (push to main) and `release.yml` (manual) |
+| `.github/workflows/` | `build.yml` (push to main, or manual), `android.yml` (called by `build.yml`, or a push with `[android]` in the commit message) and `release.yml` (manual) |
 
 ## Project conventions
 

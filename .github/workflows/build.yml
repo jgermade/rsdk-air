@@ -98,35 +98,7 @@ jobs:
 
   android:
     name: android
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - uses: android-actions/setup-android@v3
-
-      - name: Install NDK and CMake
-        run: sdkmanager "ndk;27.2.12479018" "cmake;3.22.1"
-
-      - name: Build APK
-        working-directory: android
-        run: |
-          plus=false
-          [ "$RSDKAIR_ENABLE_PLUS" = "ON" ] && plus=true
-          ./gradlew --no-daemon assembleRelease \
-            -PrsdkairVersion="$RSDKAIR_VERSION" -PrsdkairEnablePlus="$plus"
-          mkdir -p ../dist
-          cp app/build/outputs/apk/release/app-release.apk ../dist/rsdk-air-android.apk
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rsdk-air-android${{ env.RSDKAIR_ENABLE_PLUS == 'ON' && '-plus-private' || '' }}
-          path: dist/rsdk-air-android.apk
-          retention-days: 7
-          if-no-files-found: error
+    uses: ./.github/workflows/android.yml
+    with:
+      version: ${{ inputs.version }}
+      enable_plus: ${{ inputs.enable_plus == true }}
