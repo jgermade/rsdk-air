@@ -858,7 +858,9 @@ bool Picker::open(std::string &error)
 #if defined(__ANDROID__)
     // Fullscreen hides the status and navigation bars (immersive mode). Without it they
     // stay on screen over the picker: with targetSdk 35 the app draws edge to edge.
-    const Uint32 window_flags = SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_ALLOW_HIGHDPI;
+    // Resizable keeps every orientation: without it SDL locks the screen to the one the
+    // device had when the window was created (SDLActivity.setOrientationBis).
+    const Uint32 window_flags = SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
 #else
     const Uint32 window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
 #endif
