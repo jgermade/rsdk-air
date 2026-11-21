@@ -70,7 +70,7 @@ int run_game(const Options &options, const fs::path &root)
     const GameStatus status = detect_game(root, *game);
     if (!status.available) {
         show_error(std::string(game->title), status.reason);
-        return kExitGameUnavailable;
+        return status.engine_found ? kExitGameUnavailable : kExitModuleMissing;
     }
 
     EngineRun run;
@@ -179,6 +179,8 @@ int run_picker(const fs::path &root)
         if (available.empty()) {
             message = "No games found. Put your own game files here:\n\n";
             for (const GameStatus &status : games) {
+                if (!status.engine_found)
+                    continue;  // this build cannot run it anyway
                 message += "  " + std::string(status.spec->title) + ": " + path_to_utf8(status.data_dir) + "/" +
                            std::string(status.spec->required.front()) + "\n";
             }

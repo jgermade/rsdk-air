@@ -150,10 +150,14 @@ void test_rom()
     CHECK(!check_s3k_rom_file(dir / "missing.bin").ok);
 }
 
+// Every engine counts as installed, so the detect test only looks at game data.
+std::string any_engine(std::string_view) { return {}; }
+
 void test_detect()
 {
     const fs::path root = temp_dir("detect");
-    for (const GameStatus &s : detect_games(root)) {
+    for (const GameStatus &s : detect_games(root, any_engine)) {
+        CHECK(s.engine_found);
         CHECK(!s.available);
         CHECK(s.reason.find("missing") != std::string::npos);
     }
@@ -161,7 +165,7 @@ void test_detect()
     write_file(root / "games" / "sonic1" / "Data.rsdk", {1, 2, 3});
     write_file(root / "games" / "s3air" / "Sonic_Knuckles_wSonic3.bin", fake_rom(kS3kRomSize / 2, ""));
 
-    const auto games = detect_games(root);
+    const auto games = detect_games(root, any_engine);
     CHECK(games.size() == catalog().size());
     for (const GameStatus &s : games) {
         if (s.spec->id == "sonic1") {
@@ -176,7 +180,34 @@ void test_detect()
     }
 
     write_file(root / "games" / "s3air" / "Sonic_Knuckles_wSonic3.bin", fake_rom(kS3kRomSize, "GM MK-1563 -00"));
-    CHECK(detect_game(root, *find_game("s3air")).available);
+    CHECK(detect_game(root, *find_game("s3air"), any_engine).available);
+}
+
+void test_detect_engines()
+{
+    // Data present for two games, but only rsdkv4 is installed.
+    const fs::path root = temp_dir("detect-engines");
+    write_file(root / "games" / "sonic1" / "Data.rsdk", {1, 2, 3});
+    write_file(root / "games" / "soniccd" / "Data.rsdk", {1, 2, 3});
+    const EngineProbe only_rsdkv4 = [](std::string_view module) {
+        return module == "rsdkv4" ? std::string() : "no " + std::string(module);
+    };
+
+    const GameStatus s1 = detect_game(root, *find_game("sonic1"), only_rsdkv4);
+    CHECK(s1.available && s1.engine_found && s1.reason.empty());
+
+    const GameStatus cd = detect_game(root, *find_game("soniccd"), only_rsdkv4);
+    CHECK(!cd.available && !cd.engine_found && cd.reason == "no rsdkv3");
+
+    // Without an engine, the engine is the reason even when the data is missing too.
+    const GameStatus mania = detect_game(root, *find_game("mania"), only_rsdkv4);
+    CHECK(!mania.available && !mania.engine_found && mania.reason == "no rsdkv5");
+
+    // The default probe: only modules this build includes, and only if the file exists.
+    CHECK(probe_engine("no-such-engine").find("does not include the no-such-engine engine") != std::string::npos);
+#if defined(RSDKAIR_RSDKV4_MODULE)
+    CHECK(probe_engine("rsdkv4").empty());
+#endif
 }
 
 void test_windows_quoting()
@@ -399,6 +430,7 @@ int main(int argc, char **argv)
         {"cli", test_cli},
         {"rom", test_rom},
         {"detect", test_detect},
+        {"detect_engines", test_detect_engines},
         {"windows_quoting", test_windows_quoting},
         {"module_hidden_symbols", test_module_hidden_symbols},
         {"run_engine", test_run_engine},

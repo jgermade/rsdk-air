@@ -82,6 +82,15 @@ add_subdirectory(src/core)
 add_subdirectory(src/launcher)
 add_subdirectory(engines)
 
+# The engines this build includes, for the launcher (generated after engines/ has run).
+get_property(rsdkair_engine_modules GLOBAL PROPERTY RSDKAIR_ENGINE_MODULES)
+list(LENGTH rsdkair_engine_modules RSDKAIR_ENGINE_COUNT)
+set(RSDKAIR_ENGINE_LIST "")
+foreach(module IN LISTS rsdkair_engine_modules)
+    string(APPEND RSDKAIR_ENGINE_LIST "\"${module}\", ")
+endforeach()
+configure_file(src/core/engines.hpp.in "${PROJECT_BINARY_DIR}/src/core/generated/rsdkair/engines.hpp" @ONLY)
+
 if(RSDKAIR_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)

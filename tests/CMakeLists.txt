@@ -12,7 +12,7 @@ if(TARGET rsdkv4)
     add_test(NAME rsdkv4_module COMMAND rsdkair_tests rsdkv4_module)
 endif()
 
-foreach(name catalog cli rom detect windows_quoting module_hidden_symbols run_engine run_engine_errors child_process
+foreach(name catalog cli rom detect detect_engines windows_quoting module_hidden_symbols run_engine run_engine_errors child_process
         ini saves_rsdkv4)
     add_test(NAME ${name} COMMAND rsdkair_tests ${name})
 endforeach()
@@ -24,6 +24,18 @@ set_tests_properties(launcher_version PROPERTIES PASS_REGULAR_EXPRESSION "rsdk-a
 set(empty_root "${CMAKE_CURRENT_BINARY_DIR}/empty-root")
 add_test(NAME launcher_list COMMAND rsdk-air --list --data-root "${empty_root}")
 set_tests_properties(launcher_list PROPERTIES PASS_REGULAR_EXPRESSION "sonic1 +Sonic the Hedgehog +not available")
+
+# Sonic CD's data is there, but no build includes the rsdkv3 engine yet.
+set(cd_root "${CMAKE_CURRENT_BINARY_DIR}/cd-root")
+file(WRITE "${cd_root}/games/soniccd/Data.rsdk" "not real data")
+if(NOT TARGET rsdkv3)
+    add_test(NAME launcher_list_no_engine COMMAND rsdk-air --list --data-root "${cd_root}")
+    set_tests_properties(launcher_list_no_engine PROPERTIES
+        PASS_REGULAR_EXPRESSION "soniccd +Sonic CD +not available: this build of rsdk-air does not include the rsdkv3 engine")
+    add_test(NAME launcher_game_no_engine COMMAND rsdk-air --game soniccd --data-root "${cd_root}")
+    set_tests_properties(launcher_game_no_engine PROPERTIES
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy" WILL_FAIL ON)
+endif()
 
 add_test(NAME launcher_bad_args COMMAND rsdk-air --nope)
 set_tests_properties(launcher_bad_args PROPERTIES WILL_FAIL ON)
