@@ -490,13 +490,16 @@ struct Picker::Impl {
         const float room = size.y - top - 64.0f * u - 200.0f * u;
         const float by_height =
             (room - static_cast<float>(rows) * (kCaption * u + gap)) / static_cast<float>(rows) / kCoverAspect;
-        l.tile = std::max(64.0f * u, std::min({tile_for(cols), by_height, 240.0f * u}));
+        // The row spans the details panel's width, as in portrait: covers as wide as that
+        // allows; if the height stops them first, the space between them grows instead.
+        l.tile = std::max(64.0f * u, std::min(tile_for(cols), by_height));
         l.tile_h = l.tile * kCoverAspect;
+        const float hgap = cols > 1 ? (width - static_cast<float>(cols) * l.tile) / static_cast<float>(cols - 1) : 0.0f;
         // Centre covers + panel (about 160 px) vertically in the space between header and hints.
         const float block = static_cast<float>(rows) * (l.tile_h + kCaption * u + gap) - gap + 22.0f * u + 160.0f * u;
         top = origin.y + std::max(top, top + (size.y - 64.0f * u - top - block) / 2);
         for (int i = 0; i < count; ++i) {
-            const float x = left + static_cast<float>(i % cols) * (l.tile + gap);
+            const float x = left + static_cast<float>(i % cols) * (l.tile + hgap);
             const float y = top + static_cast<float>(i / cols) * (l.tile_h + kCaption * u + gap);
             l.min.emplace_back(x, y);
             l.max.emplace_back(x + l.tile, y + l.tile_h);
