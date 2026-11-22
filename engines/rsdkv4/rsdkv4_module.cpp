@@ -182,7 +182,7 @@ void setup_menu(const RsdkAirHost *host)
         activeStageList = s.list;
         stageListPosition = s.stage;
         stageMode = STAGEMODE_LOAD;
-        Engine.gameMode = ENGINE_MAINGAME;
+        rsdkv4_bridge::enter_game_loop();  // also when the native title or menus are running
         SetGlobalVariableByName("options.gameMode", 0);
         SetGlobalVariableByName("lampPostID", 0); // Sonic 1
         SetGlobalVariableByName("starPostID", 0); // Sonic 2
