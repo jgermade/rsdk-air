@@ -98,7 +98,7 @@ const char *const kOnOff[] = {"Off", "On", nullptr};
 #if defined(__ANDROID__)
 constexpr int kSettingCount = 3;
 #else
-constexpr int kSettingCount = 4;
+constexpr int kSettingCount = 5;
 #endif
 
 int setting_get(int i, RsdkAirSetting *s)
@@ -111,6 +111,7 @@ int setting_get(int i, RsdkAirSetting *s)
     case 1: *s = {"Sound volume", RSDKAIR_SETTING_RANGE, 0, 100, 10, nullptr, sound}; return 1;
     case 2: *s = {"Smoothing", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kSmoothing, g_smooth}; return 1;
     case 3: *s = {"Fullscreen", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff, RSDK::videoSettings.windowed ? 0 : 1}; return 1;
+    case 4: *s = {"VSync", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff, RSDK::videoSettings.vsync ? 1 : 0}; return 1;
     default: return 0;
     }
 }
@@ -130,6 +131,11 @@ void setting_set(int i, int v)
         // drawing with. The window changes in place; the logical size rescales.
         RSDK::videoSettings.windowed = v ? 0 : 1;
         SDL_SetWindowFullscreen(RSDK::RenderDevice::window, v ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+        break;
+    case 4:
+        // In place, as fullscreen; the engine's own 60 FPS cap stays on either way.
+        RSDK::videoSettings.vsync = v ? 1 : 0;
+        SDL_RenderSetVSync(RSDK::RenderDevice::renderer, v ? 1 : 0);
         break;
     default: return;
     }

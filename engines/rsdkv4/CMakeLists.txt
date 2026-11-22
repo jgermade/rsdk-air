@@ -56,6 +56,10 @@ rsdkair_patch_replace(engine [=[    while (SDL_PollEvent(&Engine.sdlEvents)) {]=
 rsdkair_patch_replace(engine [=[                SDL_GL_SwapWindow(Engine.window);]=]
 [=[                rsdkair_rsdkv4_menu_frame(); // rsdk-air: may open the in-game menu
                 SDL_GL_SwapWindow(Engine.window);]=])
+# The frame cap stays on with VSync too (upstream drops it, so a 120/144 Hz monitor would
+# run the game 2-2.4 times too fast); VSync then only removes tearing.
+rsdkair_patch_replace(engine [=[        if (!vsync) {]=]
+[=[        { // rsdk-air: 60 FPS cap with or without VSync]=])
 rsdkair_patch_end(engine RSDKV4_RETROENGINE_CPP)
 
 # The game's own pause (the touch pause button, Start, losing focus) sets ENGINE_INITPAUSE,

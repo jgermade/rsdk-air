@@ -120,14 +120,14 @@ void find_screens()
     }
 }
 
-// Settings: music and sound volume, smoothing, fullscreen (desktop). Saved in the
+// Settings: music and sound volume, smoothing, fullscreen and VSync (desktop). Saved in the
 // engine's settings.ini by its own WriteSettings().
 const char *const kSmoothing[] = {"Sharp pixels", "Smooth", nullptr};
 const char *const kOnOff[] = {"Off", "On", nullptr};
 #if RETRO_PLATFORM == RETRO_ANDROID
 constexpr int kSettingCount = 3;
 #else
-constexpr int kSettingCount = 4;
+constexpr int kSettingCount = 5;
 #endif
 
 int setting_get(int i, RsdkAirSetting *s)
@@ -138,6 +138,7 @@ int setting_get(int i, RsdkAirSetting *s)
     case 1: *s = {"Sound volume", RSDKAIR_SETTING_RANGE, 0, MAX_VOLUME, 10, nullptr, sfxVolume}; return 1;
     case 2: *s = {"Smoothing", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kSmoothing, Engine.scalingMode ? 1 : 0}; return 1;
     case 3: *s = {"Fullscreen", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff, Engine.isFullScreen ? 1 : 0}; return 1;
+    case 4: *s = {"VSync", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff, Engine.vsync ? 1 : 0}; return 1;
     default: return 0;
     }
 }
@@ -151,6 +152,11 @@ void setting_set(int i, int v)
     case 3:
         Engine.startFullScreen = v != 0;
         SetFullScreen(v != 0);
+        break;
+    case 4:
+        // The engine's GL context is current here (the menu runs inside its frame).
+        Engine.vsync = v != 0;
+        SDL_GL_SetSwapInterval(Engine.vsync ? 1 : 0);
         break;
     default: return;
     }
