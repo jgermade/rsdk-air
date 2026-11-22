@@ -240,6 +240,17 @@ const std::vector<CreditSection> &credits()
     return sections;
 }
 
+// The same from top (0) to bottom (1), when a cover is cropped to a landscape tile
+// (portrait on a tablet, Mania's wide tile).
+float cover_anchor_y(std::string_view id)
+{
+    if (id == "soniccd")
+        return 0.92f;  // the disc at the bottom right
+    if (id == "mania")
+        return 0.3f;   // Knuckles' and Tails' heads near the top
+    return 0.5f;
+}
+
 // The engine's name as players know it, in capitals for the panel's label.
 std::string engine_label(std::string_view module)
 {
@@ -481,7 +492,7 @@ struct Picker::Impl {
         const float width = size.x - 2 * margin;
         auto tile_for = [&](int c) { return (width - static_cast<float>(c - 1) * gap) / static_cast<float>(c); };
         if (size.y > size.x)
-            return layout_portrait(l, count, origin, size, top, 20.0f * u, margin, tile_for(2));
+            return layout_portrait(l, count, origin, size, top, 24.0f * u, margin);
         int cols = std::max(1, count);
         while (cols > 1 && tile_for(cols) < 130.0f * u)
             --cols;
@@ -512,46 +523,45 @@ struct Picker::Impl {
 
     // Portrait (a phone held upright): square covers two per row; with an odd count the
     // last one spans both columns at 16:9 (2 + 2 + 1 wide for five games).
-    Layout layout_portrait(Layout &l, int count, ImVec2 origin, ImVec2 size, float top, float gap, float margin,
-                           float max_tile) const
+    Layout layout_portrait(Layout &l, int count, ImVec2 origin, ImVec2 size, float top, float gap, float margin) const
     {
         const float u = l.u;
         l.portrait = true;
-        const float cap = kCaptionPortrait * u;  // the title only
-        const float width = size.x - 2 * margin;
+        const float cap = kCaptionPortrait * u;
+        const float width = size.x - 2 * margin;  // the details panel's width
         const int full_rows = count / 2;
         const bool wide_last = count % 2 == 1;
         constexpr float kWide = 9.0f / 16.0f;  // height / width of the wide cover
-        // Covers as wide as the width allows (the margin keeps air at the sides), closer
-        // together than in landscape: gap is smaller here.
-        max_tile = (size.x - 2 * margin - gap) / 2;
-        // Height used: full_rows * (tile + cap + gap) + [ (2 tile + gap) * kWide + cap ].
+        // The grid always spans the panel's width: two columns of covers. They are square
+        // when the height allows (phones); otherwise (tablets) every cover gets less tall
+        // by the same factor and becomes landscape, cropped to fit.
+        const float tile_w = count > 1 ? (width - gap) / 2 : width;
+        const float wide_full = width * kWide;
         // Below them: the details panel (title on two lines, status, engine credit) and
         // the hints, about 300 at scale 1.
         const float room = size.y - top - 64.0f * u - 300.0f * u;
-        const float per_tile = static_cast<float>(full_rows) + (wide_last ? 2 * kWide : 0.0f);
-        const float fixed = static_cast<float>(full_rows) * (cap + gap) + (wide_last ? gap * kWide + cap : -gap);
-        const float by_height = per_tile > 0 ? (room - fixed) / per_tile : max_tile;
-        l.tile = std::max(64.0f * u, std::min(max_tile, by_height));
-        l.tile_h = l.tile;
-        const float grid_w = count > 1 ? 2 * l.tile + gap : l.tile;
-        const float wide_h = grid_w * kWide;
-        const float block = static_cast<float>(full_rows) * (l.tile + cap + gap) + (wide_last ? wide_h + cap : -gap) +
+        const float tall = static_cast<float>(full_rows) * tile_w + (wide_last ? wide_full : 0.0f);
+        const float fixed = static_cast<float>(full_rows) * (cap + gap) + (wide_last ? cap : -gap);
+        const float squash = tall > 0 ? std::clamp((room - fixed) / tall, 0.45f, 1.0f) : 1.0f;
+        l.tile = tile_w;
+        l.tile_h = tile_w * squash;
+        const float wide_h = wide_full * squash;
+        const float block = static_cast<float>(full_rows) * (l.tile_h + cap + gap) + (wide_last ? wide_h + cap : -gap) +
                             22.0f * u + 250.0f * u;
         top = origin.y + std::max(top, top + (size.y - 64.0f * u - top - block) / 2);
-        const float x0 = origin.x + margin + (width - grid_w) / 2;
+        const float x0 = origin.x + margin;
         for (int i = 0; i < count; ++i) {
-            const float y = top + static_cast<float>(i / 2) * (l.tile + cap + gap);
+            const float y = top + static_cast<float>(i / 2) * (l.tile_h + cap + gap);
             if (wide_last && i == count - 1) {
                 l.min.emplace_back(x0, y);
-                l.max.emplace_back(x0 + grid_w, y + wide_h);
+                l.max.emplace_back(x0 + width, y + wide_h);
             } else {
                 const float x = x0 + static_cast<float>(i % 2) * (l.tile + gap);
                 l.min.emplace_back(x, y);
-                l.max.emplace_back(x + l.tile, y + l.tile);
+                l.max.emplace_back(x + l.tile, y + l.tile_h);
             }
         }
-        const float grid_bottom = l.max.empty() ? top : l.max.back().y + cap;  // caption under the last row
+        const float grid_bottom = l.max.empty() ? top : l.max.back().y + cap;
         l.panel_min = ImVec2(origin.x + margin, grid_bottom + 22.0f * u);
         l.panel_max = ImVec2(origin.x + size.x - margin, origin.y + size.y - 62.0f * u);
         return l;
@@ -786,7 +796,7 @@ struct Picker::Impl {
                 uv0.x = (1 - k) * cover_anchor_x(game.spec->id), uv1.x = uv0.x + k;
             } else {
                 const float k = art_aspect / tile_aspect;
-                uv0.y = (1 - k) / 2, uv1.y = (1 + k) / 2;
+                uv0.y = (1 - k) * cover_anchor_y(game.spec->id), uv1.y = uv0.y + k;
             }
             dl->AddImageRounded(texture_ref(cover.art), min, max, uv0, uv1, IM_COL32_WHITE, round);
         } else {
