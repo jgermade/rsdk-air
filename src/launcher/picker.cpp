@@ -167,6 +167,83 @@ float cover_anchor_x(std::string_view id)
     return 0.5f;
 }
 
+// Credits ------------------------------------------------------------------------------
+//
+// The RSDK and Sonic Mania decompilation licenses require crediting the original and the
+// decompilation authors (names as their LICENSE.md files give them); Sonic 3 A.I.R. is
+// GPL-3.0, so its source is pointed to. See ROADMAP/2026-11-20/upstreams-and-licensing.md.
+
+// One line under a game's title: who made the engine it runs on.
+std::string engine_credit(std::string_view module)
+{
+    if (module == "rsdkv3")
+        return "RSDK v3 by Christian \"Taxman\" Whitehead. Decompilation by Rubberduckycooly and st\xC3\x97tic.";
+    if (module == "rsdkv4")
+        return "RSDK v4 by Christian \"Taxman\" Whitehead. Decompilation by Rubberduckycooly and st\xC3\x97tic.";
+    if (module == "rsdkv5")
+        return "RSDK v5 by Evening Star. Decompilations by Rubberduckycooly, chuliRMG and st\xC3\x97tic.";
+    if (module == "sonic3air")
+        return "Sonic 3 A.I.R. by Eukaryot (GPL-3.0).";
+    return {};
+}
+
+struct Credit {
+    const char *what;
+    const char *who;
+};
+
+struct CreditSection {
+    const char *title;
+    std::vector<Credit> lines;
+};
+
+const std::vector<CreditSection> &credits()
+{
+    static const std::vector<CreditSection> sections = {
+        {"GAME ENGINES",
+         {
+             {"RSDK v3 and v4 (Sonic CD, Sonic 1, Sonic 2)",
+              "Original engine by Christian \"Taxman\" Whitehead. Decompilation by Rubberduckycooly and "
+              "st\xC3\x97tic (RSDKModding). RSDKv3/v4 Decompilation License: non-commercial."},
+             {"RSDK v5U (Sonic Mania)",
+              "Original engine by Evening Star. Decompilation by Rubberduckycooly and chuliRMG (RSDKModding). "
+              "RSDKv5(U) Decompilation License: non-commercial."},
+             {"Sonic Mania game code",
+              "Decompilation by Rubberduckycooly, with st\xC3\x97tic (RSDKModding). Sonic Mania Decompilation "
+              "License: non-commercial."},
+             {"Sonic 3 A.I.R.",
+              "By Eukaryot. GPL-3.0, source code at github.com/Eukaryot/sonic3air. It runs as its own program "
+              "(its own app on Android), never inside rsdk-air."},
+         }},
+        {"LIBRARIES",
+         {
+             {"SDL2", "Sam Lantinga and contributors. zlib License."},
+             {"Dear ImGui", "Omar Cornut and contributors. MIT License."},
+             {"libogg, libvorbis, libtheora", "Xiph.Org Foundation. BSD License."},
+             {"stb_image, stb_vorbis", "Sean Barrett. MIT License or public domain."},
+             {"tinyxml2, theoraplay", "Lee Thomason; Ryan C. Gordon. zlib License."},
+             {"iniparser, miniz", "Nicolas Devillard; Rich Geldreich and others. MIT License."},
+             {"GLEW (desktop)", "Modified BSD, Mesa (MIT) and Khronos licenses."},
+             {"Inter (font)", "Rasmus Andersson. SIL Open Font License 1.1."},
+         }},
+        {"ART",
+         {
+             {"Covers", "Fan art made for play.germade by its owner, in the style of the games."},
+             {"Save screen", "Characters and zone pictures from rsdkv4-wasm (wasm-gaming), after craft's game "
+                             "launcher."},
+         }},
+        {"RSDK-AIR",
+         {
+             {"rsdk-air", "A free, non-commercial fan project. MIT License, source code at "
+                          "github.com/jgermade/rsdk-air. The license texts of everything above are in the "
+                          "licenses folder of each download."},
+             {"SEGA", "Not affiliated with or endorsed by SEGA. Sonic the Hedgehog and its characters are "
+                      "trademarks of SEGA. Play with your own copy of the games."},
+         }},
+    };
+    return sections;
+}
+
 // The engine's name as players know it, in capitals for the panel's label.
 std::string engine_label(std::string_view module)
 {
@@ -221,7 +298,7 @@ bool importable(const GameStatus &game)
 #endif
 }
 
-enum class Action { None, Left, Right, Up, Down, Accept, Back, More };
+enum class Action { None, Left, Right, Up, Down, Accept, Back, More, Credits };
 
 // Games whose save slots the picker shows before starting (Sonic 1 and 2): the module
 // takes --slot / --player (engines/rsdkv4/rsdkv4_module.cpp).
@@ -291,6 +368,15 @@ struct Picker::Impl {
     float delete_anim = 0.0f;
     std::string delete_error;
     std::vector<std::string> chosen_args;  // engine arguments for the last choice
+
+    // Credits screen (a Credits pill in the header, X / C / F1).
+    bool credits_open = false;
+    float credits_anim = 0.0f;
+    float credits_scroll = 0.0f;      // pixels scrolled
+    float credits_scroll_max = 0.0f;  // from the last frame's layout
+    bool credits_dragged = false;  // the finger moved: releasing it is not a tap
+    ImVec2 credits_pill_min, credits_pill_max;
+    ImVec2 credits_close_min, credits_close_max;
 
     struct SlotHits {
         ImVec2 card_min[kSlotCards], card_max[kSlotCards];
@@ -631,7 +717,7 @@ struct Picker::Impl {
             return h;
         };
         auto height_for = [&](int c, float w) {  // heading + cards + hints
-            return heading_h + 30.0f * u + grid_height(c, w) + 56.0f * u;
+            return heading_h + 30.0f * u + grid_height(c, w) + 82.0f * u;
         };
         const float room_h = size.y - 86.0f * u;
         int cols = kSlotCards;
@@ -651,7 +737,7 @@ struct Picker::Impl {
         l.k = w / 170.0f;
         const float grid_w = static_cast<float>(cols) * w + static_cast<float>(cols - 1) * gap;
         const float grid_h = grid_height(cols, w);
-        const float block = heading_h + 30.0f * u + grid_h + 34.0f * u + 22.0f * u;
+        const float block = heading_h + 30.0f * u + grid_h + 34.0f * u + 22.0f * u + 26.0f * u;  // + credit line
         const float top = origin.y + 70.0f * u;  // below the app's header
         const float room = origin.y + size.y - top - 16.0f * u;
         const float y0 = top + std::max(0.0f, (room - block) / 2);
@@ -789,6 +875,74 @@ struct Picker::Impl {
         dl->AddRect(pill_min, pill_max, rgba(255, 255, 255, 40), 999.0f, 1.0f * u);
         text(dl, font_regular, 14.0f * u,
              ImVec2(pill_min.x + 14.0f * u, (pill_min.y + pill_max.y - vs.y) / 2), rgba(220, 220, 230), version);
+
+        // Credits, left of the version: a button (tap, or X / C).
+        const char *label = "Credits";
+        const ImVec2 cs = measure(font_bold, 14.0f * u, label);
+        credits_pill_max = ImVec2(pill_min.x - 10.0f * u, pill_max.y);
+        credits_pill_min = ImVec2(credits_pill_max.x - cs.x - 28.0f * u, pill_min.y);
+        dl->AddRectFilled(credits_pill_min, credits_pill_max, rgba(255, 255, 255, 30), 999.0f);
+        dl->AddRect(credits_pill_min, credits_pill_max, rgba(255, 255, 255, 60), 999.0f, 1.0f * u);
+        text(dl, font_bold, 14.0f * u,
+             ImVec2(credits_pill_min.x + 14.0f * u, (credits_pill_min.y + credits_pill_max.y - cs.y) / 2),
+             IM_COL32_WHITE, label);
+    }
+
+    // The Credits screen: a scrolling panel over everything, Close at the bottom.
+    void draw_credits(ImDrawList *dl, float u, float dt)
+    {
+        credits_anim = approach(credits_anim, credits_open ? 1.0f : 0.0f, dt, 16.0f);
+        if (credits_anim < 0.01f)
+            return;
+        const float a = credits_anim;
+        auto col = [&](ImU32 c) { return with_alpha(c, a); };
+        const ImVec2 size = ImGui::GetIO().DisplaySize;
+        dl->AddRectFilled(ImVec2(0, 0), size, rgba(5, 5, 10, static_cast<int>(200 * a)));
+        const ImVec2 o = safe_min(), e = safe_max();
+        const float w = std::min(760.0f * u, e.x - o.x - 32.0f * u);
+        const ImVec2 min((o.x + e.x - w) / 2, o.y + 24.0f * u + (1.0f - a) * 20.0f * u);
+        const ImVec2 max(min.x + w, e.y - 24.0f * u);
+        dl->AddRectFilled(min, max, col(rgba(24, 23, 33, 250)), 22.0f * u);
+        dl->AddRect(min, max, col(rgba(255, 255, 255, 30)), 22.0f * u, 1.0f * u);
+        const float pad = 28.0f * u;
+        text(dl, font_bold, 28.0f * u, ImVec2(min.x + pad, min.y + pad - 4.0f * u), col(IM_COL32_WHITE), "Credits");
+
+        // Scrolling body, clipped between the title and the Close button.
+        const ImVec2 bmin(min.x + pad, min.y + pad + 44.0f * u), bmax(max.x - pad, max.y - pad - 58.0f * u);
+        const float text_w = bmax.x - bmin.x;
+        dl->PushClipRect(bmin, bmax, true);
+        float y = bmin.y - credits_scroll;
+        for (const CreditSection &section : credits()) {
+            text(dl, font_bold, 12.0f * u, ImVec2(bmin.x, y), col(rgba(0x8e, 0x97, 0xa9)), section.title);
+            y += 24.0f * u;
+            for (const Credit &c : section.lines) {
+                text(dl, font_bold, 15.5f * u, ImVec2(bmin.x, y), col(IM_COL32_WHITE), c.what, text_w);
+                y += measure(font_bold, 15.5f * u, c.what, text_w).y + 3.0f * u;
+                text(dl, font_regular, 14.0f * u, ImVec2(bmin.x, y), col(rgba(196, 196, 210)), c.who, text_w);
+                y += measure(font_regular, 14.0f * u, c.who, text_w).y + 14.0f * u;
+            }
+            y += 10.0f * u;
+        }
+        dl->PopClipRect();
+        const float content_h = y + credits_scroll - bmin.y;
+        credits_scroll_max = std::max(0.0f, content_h - (bmax.y - bmin.y));
+        credits_scroll = std::clamp(credits_scroll, 0.0f, credits_scroll_max);
+        if (credits_scroll_max > 0) {  // a thin scroll bar
+            const float track = bmax.y - bmin.y;
+            const float thumb = std::max(30.0f * u, track * track / content_h);
+            const float ty = bmin.y + (track - thumb) * credits_scroll / credits_scroll_max;
+            dl->AddRectFilled(ImVec2(max.x - 14.0f * u, ty), ImVec2(max.x - 10.0f * u, ty + thumb),
+                              col(rgba(255, 255, 255, 70)), 999.0f);
+        }
+
+        credits_close_max = ImVec2((min.x + max.x) / 2 + 90.0f * u, max.y - pad);
+        credits_close_min = ImVec2((min.x + max.x) / 2 - 90.0f * u, credits_close_max.y - 46.0f * u);
+        dl->AddRectFilled(credits_close_min, credits_close_max, col(IM_COL32_WHITE), 999.0f);
+        const ImVec2 ls = measure(font_bold, 18.0f * u, "Close");
+        text(dl, font_bold, 18.0f * u,
+             ImVec2((credits_close_min.x + credits_close_max.x - ls.x) / 2,
+                    (credits_close_min.y + credits_close_max.y - ls.y) / 2),
+             col(rgba(14, 13, 20)), "Close");
     }
 
     void draw_lock(ImDrawList *dl, ImVec2 max, float u)
@@ -928,7 +1082,10 @@ struct Picker::Impl {
         const float title_size = std::min(40.0f * u, l.panel_max.y - min.y > 150.0f * u ? 40.0f * u : 30.0f * u);
         const float title_h = measure(font_bold, title_size, title, text_w).y;
         const float line_h = measure(font_regular, 16.0f * u, line, text_w).y;
-        const float height = std::max(pad + 28.0f * u + title_h + 8.0f * u + line_h + pad, 2 * pad + 30.0f * u + 18.0f * u + 52.0f * u);
+        const std::string credit = engine_credit(game.spec->module);
+        const float credit_h = credit.empty() ? 0.0f : 10.0f * u + measure(font_regular, 13.0f * u, credit, text_w).y;
+        const float height = std::max(pad + 28.0f * u + title_h + 8.0f * u + line_h + credit_h + pad,
+                                      2 * pad + 30.0f * u + 18.0f * u + 52.0f * u);
         const ImVec2 max(l.panel_max.x, std::min(min.y + height, l.panel_max.y));
         const ImU32 bg = rgba(24, 23, 33, 235);
 
@@ -947,6 +1104,10 @@ struct Picker::Impl {
         text(dl, font_bold, title_size, ImVec2(min.x + pad, y), IM_COL32_WHITE, title, text_w);
         y += title_h + 8.0f * u;
         text(dl, font_regular, 16.0f * u, ImVec2(min.x + pad, y), rgba(200, 200, 212), line, text_w);
+        if (!credit.empty()) {
+            y += line_h + 10.0f * u;
+            text(dl, font_regular, 13.0f * u, ImVec2(min.x + pad, y), rgba(140, 140, 156), credit, text_w);
+        }
 
         // Right: chips (year, status) and the Play button.
         const float rx = max.x - pad - right_w;
@@ -1251,6 +1412,11 @@ struct Picker::Impl {
             c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
         text(dl, font_bold, 12.0f * u, l.heading, rgba(0x8e, 0x97, 0xa9), kicker);
         text(dl, font_bold, 32.0f * u, ImVec2(l.heading.x, l.heading.y + 20.0f * u), IM_COL32_WHITE, "Load game");
+        // Who made the engine, under the cards (the decompilation licenses ask for credit).
+        const std::string credit = engine_credit(game.spec->module);
+        const float cw = measure(font_regular, 12.5f * u, credit).x;
+        text(dl, font_regular, 12.5f * u, ImVec2(l.centre_x - cw / 2, l.hints_y + 26.0f * u), rgba(120, 124, 140),
+             credit);
 
         for (int i = 0; i < kSlotCards; ++i) {
             if (i != slot_focus)
@@ -1259,7 +1425,7 @@ struct Picker::Impl {
         draw_slot_card(dl, l, slot_focus);  // on top: its ring and shadow
         if (!delete_error.empty()) {
             const ImVec2 es = measure(font_regular, 14.0f * u, delete_error);
-            text(dl, font_regular, 14.0f * u, ImVec2(l.centre_x - es.x / 2, l.hints_y + 18.0f * u), rgba(240, 120, 120),
+            text(dl, font_regular, 14.0f * u, ImVec2(l.centre_x - es.x / 2, l.hints_y + 48.0f * u), rgba(240, 120, 120),
                  delete_error);
         }
     }
@@ -1324,6 +1490,7 @@ struct Picker::Impl {
         float x = e.x - kMargin * u;
         const float y = e.y - 28.0f * u;
         draw_hint(dl, x, y, u, nullptr, 0, "Arrows", "Navigate");
+        draw_hint(dl, x, y, u, "X", rgba(110, 160, 250), "C", "Credits");
         draw_hint(dl, x, y, u, "B", rgba(240, 110, 110), "Esc", "Quit");
         if (can_play)
             draw_hint(dl, x, y, u, "A", rgba(80, 220, 140), "Enter", "Play");
@@ -1384,6 +1551,8 @@ struct Picker::Impl {
         case SDLK_AC_BACK: return Action::Back;
         case SDLK_DELETE:
         case SDLK_BACKSPACE: return Action::More;
+        case SDLK_c:
+        case SDLK_F1: return Action::Credits;
         default: return Action::None;
         }
     }
@@ -1400,6 +1569,7 @@ struct Picker::Impl {
         case SDL_CONTROLLER_BUTTON_B:
         case SDL_CONTROLLER_BUTTON_BACK: return Action::Back;
         case SDL_CONTROLLER_BUTTON_Y: return Action::More;
+        case SDL_CONTROLLER_BUTTON_X: return Action::Credits;
         default: return Action::None;
         }
     }
@@ -1605,6 +1775,23 @@ int Picker::choose(const std::vector<GameStatus> &games)
         auto act = [&](Action a) {
             if (a == Action::None)
                 return;
+            if (s.credits_open) {
+                const float step = 60.0f * s.ui();
+                if (a == Action::Up)
+                    s.credits_scroll = std::max(0.0f, s.credits_scroll - step);
+                else if (a == Action::Down)
+                    s.credits_scroll = std::min(s.credits_scroll_max, s.credits_scroll + step);
+                else if (a == Action::Back || a == Action::Accept || a == Action::Credits)
+                    s.credits_open = false;
+                return;
+            }
+            if (a == Action::Credits) {
+                if (!s.delete_open && !s.confirm_quit) {
+                    s.credits_open = true;
+                    s.credits_scroll = 0.0f;
+                }
+                return;
+            }
             if (s.delete_open) {
                 if (a == Action::Left || a == Action::Right)
                     s.delete_focus = 1 - s.delete_focus;
@@ -1681,11 +1868,34 @@ int Picker::choose(const std::vector<GameStatus> &games)
                 break;
             case SDL_MOUSEMOTION:
                 s.pointer_used = true;
+                if (s.credits_open && (event.motion.state & SDL_BUTTON_LMASK)) {  // drag to scroll (touch too)
+                    s.credits_scroll = std::clamp(s.credits_scroll - static_cast<float>(event.motion.yrel), 0.0f,
+                                                  s.credits_scroll_max);
+                    if (std::abs(event.motion.yrel) > 2)
+                        s.credits_dragged = true;
+                }
+                break;
+            case SDL_MOUSEWHEEL:
+                if (s.credits_open) {
+                    s.credits_scroll = std::clamp(s.credits_scroll - event.wheel.preciseY * 50.0f * s.ui(), 0.0f,
+                                                  s.credits_scroll_max);
+                }
                 break;
             case SDL_MOUSEBUTTONUP: {
                 if (event.button.button != SDL_BUTTON_LEFT)
                     break;
                 const ImVec2 p(static_cast<float>(event.button.x), static_cast<float>(event.button.y));
+                if (s.credits_open) {
+                    // A drag scrolls; only a tap on Close closes.
+                    if (!s.credits_dragged && hit(p, s.credits_close_min, s.credits_close_max))
+                        s.credits_open = false;
+                    s.credits_dragged = false;
+                    break;
+                }
+                if (!s.delete_open && !s.confirm_quit && hit(p, s.credits_pill_min, s.credits_pill_max)) {
+                    act(Action::Credits);
+                    break;
+                }
                 if (s.delete_open) {
                     if (hit(p, delete_rects[0], delete_rects[1]))
                         s.delete_open = false;
@@ -1751,7 +1961,7 @@ int Picker::choose(const std::vector<GameStatus> &games)
             return chosen;
 
         // Hover follows the mouse once it has moved (touch taps go through clicks above).
-        if (s.pointer_used && !s.confirm_quit && !s.slots_open) {
+        if (s.pointer_used && !s.confirm_quit && !s.slots_open && !s.credits_open) {
             int mx = 0, my = 0;
             SDL_GetMouseState(&mx, &my);
             const int tile = s.tile_at(ImVec2(static_cast<float>(mx), static_cast<float>(my)), count);
@@ -1797,6 +2007,7 @@ int Picker::choose(const std::vector<GameStatus> &games)
         s.draw_dialog(ImGui::GetForegroundDrawList(), u, dt, s.delete_open, s.delete_anim, s.delete_focus,
                       "Delete game " + std::to_string(s.slot_focus) + "?", delete_rects);
         s.draw_confirm(ImGui::GetForegroundDrawList(), u, dt, confirm_rects);
+        s.draw_credits(ImGui::GetForegroundDrawList(), u, dt);
         ImGui::Render();
 
         SDL_SetRenderDrawColor(s.renderer, 14, 13, 20, 255);
@@ -1807,6 +2018,7 @@ int Picker::choose(const std::vector<GameStatus> &games)
         // Nothing moving: sleep until the next event instead of redrawing at full rate.
         bool settled = s.backdrop_mix > 0.995f && std::abs(s.confirm_anim - (s.confirm_quit ? 1.0f : 0.0f)) < 0.005f &&
                        std::abs(s.delete_anim - (s.delete_open ? 1.0f : 0.0f)) < 0.005f &&
+                       std::abs(s.credits_anim - (s.credits_open ? 1.0f : 0.0f)) < 0.005f &&
                        (!s.slots_open || (s.slots_anim > 0.995f && !s.new_game_card(s.slot_focus)));
         for (std::size_t i = 0; i < s.lift.size(); ++i)
             settled = settled && std::abs(s.lift[i] - (static_cast<int>(i) == s.focus ? 1.0f : 0.0f)) < 0.003f;
