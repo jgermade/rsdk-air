@@ -592,6 +592,7 @@ struct Picker::Impl {
         float k = 1.0f;  // card scale: card width / 170
         ImVec2 min[kSlotCards], max[kSlotCards];
         ImVec2 heading;  // top-left of the kicker + "Load game"
+        int order[kSlotCards] = {0, 1, 2, 3, 4, 5};  // cards in reading order (Left/Right)
         float hints_y = 0.0f;
         float centre_x = 0.0f;
     };
@@ -610,10 +611,27 @@ struct Picker::Impl {
         auto width_for = [&](int c, float cap) {
             return std::min(cap, (width - static_cast<float>(c - 1) * gap) / static_cast<float>(c));
         };
-        auto height_for = [&](int c, float w) {  // heading + rows of tall cards + hints
-            const int r = (kSlotCards + c - 1) / c;
-            return heading_h + 30.0f * u + static_cast<float>(r) * w * 220.0f / 170.0f +
-                   static_cast<float>(r - 1) * gap + 56.0f * u;
+        // Portrait: NO SAVE and GAME MENUS share the first row, the slots follow.
+        if (portrait) {
+            const int order[kSlotCards] = {0, kMenusCard, 1, 2, 3, 4};
+            std::copy(std::begin(order), std::end(order), l.order);
+        }
+        auto card_h = [&](int card, float w) {
+            return w * (card == 0 || card == kMenusCard ? 130.0f : 220.0f) / 170.0f;
+        };
+        // Each row is as tall as its tallest card.
+        auto grid_height = [&](int c, float w) {
+            float h = 0.0f;
+            for (int start = 0; start < kSlotCards; start += c) {
+                float row = 0.0f;
+                for (int i = start; i < std::min(kSlotCards, start + c); ++i)
+                    row = std::max(row, card_h(l.order[i], w));
+                h += row + (start > 0 ? gap : 0.0f);
+            }
+            return h;
+        };
+        auto height_for = [&](int c, float w) {  // heading + cards + hints
+            return heading_h + 30.0f * u + grid_height(c, w) + 56.0f * u;
         };
         const float room_h = size.y - 86.0f * u;
         int cols = kSlotCards;
@@ -631,10 +649,8 @@ struct Picker::Impl {
             w = width_for(3, 220.0f * u);
         }
         l.k = w / 170.0f;
-        const float tall = w * 220.0f / 170.0f;
-        const int rows = (kSlotCards + cols - 1) / cols;
         const float grid_w = static_cast<float>(cols) * w + static_cast<float>(cols - 1) * gap;
-        const float grid_h = static_cast<float>(rows) * tall + static_cast<float>(rows - 1) * gap;
+        const float grid_h = grid_height(cols, w);
         const float block = heading_h + 30.0f * u + grid_h + 34.0f * u + 22.0f * u;
         const float top = origin.y + 70.0f * u;  // below the app's header
         const float room = origin.y + size.y - top - 16.0f * u;
@@ -642,12 +658,17 @@ struct Picker::Impl {
         const float x0 = origin.x + margin + (width - grid_w) / 2;
         l.heading = ImVec2(x0, y0);
         const float cards_y = y0 + heading_h + 30.0f * u;
-        for (int i = 0; i < kSlotCards; ++i) {
-            const bool short_card = i == 0 || i == kMenusCard;
-            const float x = x0 + static_cast<float>(i % cols) * (w + gap);
-            const float y = cards_y + static_cast<float>(i / cols) * (tall + gap);
-            l.min[i] = ImVec2(x, y);
-            l.max[i] = ImVec2(x + w, y + (short_card ? w * 130.0f / 170.0f : tall));
+        float y = cards_y;
+        for (int start = 0; start < kSlotCards; start += cols) {
+            float row = 0.0f;
+            for (int i = start; i < std::min(kSlotCards, start + cols); ++i) {
+                const int card = l.order[i];
+                const float x = x0 + static_cast<float>(i - start) * (w + gap);
+                l.min[card] = ImVec2(x, y);
+                l.max[card] = ImVec2(x + w, y + card_h(card, w));
+                row = std::max(row, card_h(card, w));
+            }
+            y += row + gap;
         }
         l.hints_y = cards_y + grid_h + 34.0f * u + 11.0f * u;
         l.centre_x = origin.x + size.x / 2;
@@ -1557,8 +1578,15 @@ int Picker::choose(const std::vector<GameStatus> &games)
                     s.delete_focus = 0;  // No
                 }
                 break;
-            case Action::Left: s.slot_focus = std::max(0, card - 1); break;
-            case Action::Right: s.slot_focus = std::min(Impl::kSlotCards - 1, card + 1); break;
+            case Action::Left:
+            case Action::Right: {
+                const Impl::SlotLayout l = s.slot_layout();
+                const int *pos = std::find(l.order, l.order + Impl::kSlotCards, card);
+                const int at = static_cast<int>(pos - l.order) + (a == Action::Left ? -1 : 1);
+                if (at >= 0 && at < Impl::kSlotCards)
+                    s.slot_focus = l.order[at];
+                break;
+            }
             case Action::Up:
             case Action::Down:
                 if (s.new_game_card(card)) {
