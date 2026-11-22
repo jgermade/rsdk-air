@@ -843,9 +843,13 @@ struct GameMenu::Impl {
         case SDL_CONTROLLERBUTTONDOWN: pad_mode = true; return false;
         case SDL_MOUSEBUTTONDOWN:
         case SDL_MOUSEBUTTONUP:
-        case SDL_MOUSEMOTION:
-            // SDL's mouse copy of a touch on the controls is not the game's either.
-            return e.button.which == SDL_TOUCH_MOUSEID && !fingers.empty();
+            // SDL's mouse copy of a touch never reaches the game while the controls are
+            // on: it comes before the finger event, so the press of a touch on a control
+            // would get through and its release would not, and the game (which also reads
+            // the mouse as a touch) would see that spot held forever. The game still gets
+            // the finger events of touches that are not on a control.
+            return e.button.which == SDL_TOUCH_MOUSEID;
+        case SDL_MOUSEMOTION: return e.motion.which == SDL_TOUCH_MOUSEID;
         case SDL_FINGERDOWN: {
             pad_mode = false;
             const ImVec2 s = window_size();
@@ -859,7 +863,7 @@ struct GameMenu::Impl {
             else if (dist(p, l.jump) < l.jump_r * 1.7f)
                 role = Role::Jump;
             else
-                return false;  // not ours: the game's (its menus)
+                return !fingers.empty();  // the game's (its menus), unless a control is held
             fingers.push_back({e.tfinger.fingerId, role, p, true});
             return true;
         }
@@ -868,7 +872,7 @@ struct GameMenu::Impl {
             auto it = std::find_if(fingers.begin(), fingers.end(),
                                    [&](const Finger &f) { return f.id == e.tfinger.fingerId; });
             if (it == fingers.end())
-                return false;
+                return !fingers.empty();  // the game's finger, held back while a control is held
             const ImVec2 s = window_size();
             it->pos = ImVec2(e.tfinger.x * s.x, e.tfinger.y * s.y);
             if (it->role == Role::Pause) {
@@ -879,11 +883,26 @@ struct GameMenu::Impl {
                 if (it->role == Role::Pause && it->inside)
                     open_requested = true;  // opens at this frame's hook
                 fingers.erase(it);
+                if (fingers.empty())
+                    refresh_game_touches(e.tfinger.touchId);
             }
             return true;
         }
         default: return false;
         }
+    }
+
+    // The engines rebuild their touch list from all the fingers SDL knows about whenever
+    // a finger event reaches them, so no finger event goes to the game while a control
+    // is held (it would see our fingers as its own touches). Once the last control is
+    // let go, one event makes it rebuild the list from the fingers really on the screen.
+    static void refresh_game_touches(SDL_TouchID touch)
+    {
+        SDL_Event e{};
+        e.type = SDL_FINGERMOTION;
+        e.tfinger.touchId = touch;
+        e.tfinger.fingerId = -1;
+        SDL_PushEvent(&e);
     }
 
     // The buttons the fingers hold: the d-pad by direction (eight ways), the jump button.

@@ -70,6 +70,7 @@ void delete_slot(int slot)
 
 int main(int argc, char **argv)
 {
+    std::setvbuf(stdout, nullptr, _IOLBF, 0);  // lines show up even if it is killed
     const bool gl = argc > 1 && std::strcmp(argv[1], "gl1") == 0;
     const bool slots = !(argc > 2 && std::strcmp(argv[2], "--no-slots") == 0);
     // A Sonic 2 save: slot 1 Tails in Aquatic Ruin 2, slot 3 Sonic & Tails in a special stage.
@@ -142,6 +143,13 @@ int main(int argc, char **argv)
         while (SDL_PollEvent(&e)) {
             if (host->event(host->ctx, &e))
                 continue;
+            // What a real engine would see of touches (they read the mouse as a touch too).
+            if (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP)
+                std::printf("engine got mouse %s\n", e.type == SDL_MOUSEBUTTONDOWN ? "down" : "up");
+            if (e.type == SDL_FINGERDOWN || e.type == SDL_FINGERUP)
+                std::printf("engine got finger %s\n", e.type == SDL_FINGERDOWN ? "down" : "up");
+            if (e.type == SDL_FINGERMOTION && e.tfinger.fingerId == -1)
+                std::printf("engine got a touch refresh\n");
             if (e.type == SDL_QUIT)
                 g_running = false;
         }
