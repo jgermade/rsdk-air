@@ -9,6 +9,7 @@
 // The picker is a mosaic of game covers (picker.cpp, Dear ImGui). If no window can be
 // opened it falls back to a plain SDL message box with one button per game.
 
+#include "game_menu.hpp"
 #include "picker.hpp"
 
 #include <rsdkair/catalog.hpp>
@@ -160,12 +161,16 @@ int run_game(const Options &options, const fs::path &root)
     }
 #endif
 
+    // The in-game menu (start screen and pause menu), drawn over the engine's window.
+    GameMenu menu(std::string(game->id), std::string(game->title));
+
     EngineRun run;
     run.module = module_path(game->module);
     run.game_id = std::string(game->id);
     run.data_dir = status.data_dir;
     run.save_dir = status.save_dir;
     run.extra_args = options.extra_args;
+    run.host = menu.host();
 
     std::string error;
     const int code = run_engine(run, error);
