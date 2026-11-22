@@ -514,8 +514,12 @@ struct Picker::Impl {
         const int full_rows = count / 2;
         const bool wide_last = count % 2 == 1;
         constexpr float kWide = 9.0f / 16.0f;  // height / width of the wide cover
+        // Covers a little narrower than the width allows, for air at the sides.
+        max_tile *= 0.86f;
         // Height used: full_rows * (tile + cap + gap) + [ (2 tile + gap) * kWide + cap ].
-        const float room = size.y - top - 64.0f * u - 200.0f * u;
+        // Below them: the details panel (title on two lines, status, engine credit) and
+        // the hints, about 300 at scale 1.
+        const float room = size.y - top - 64.0f * u - 300.0f * u;
         const float per_tile = static_cast<float>(full_rows) + (wide_last ? 2 * kWide : 0.0f);
         const float fixed = static_cast<float>(full_rows) * (cap + gap) + (wide_last ? gap * kWide + cap : -gap);
         const float by_height = per_tile > 0 ? (room - fixed) / per_tile : max_tile;
@@ -524,7 +528,7 @@ struct Picker::Impl {
         const float grid_w = count > 1 ? 2 * l.tile + gap : l.tile;
         const float wide_h = grid_w * kWide;
         const float block = static_cast<float>(full_rows) * (l.tile + cap + gap) + (wide_last ? wide_h + cap : -gap) +
-                            22.0f * u + 160.0f * u;
+                            22.0f * u + 250.0f * u;
         top = origin.y + std::max(top, top + (size.y - 64.0f * u - top - block) / 2);
         const float x0 = origin.x + margin + (width - grid_w) / 2;
         for (int i = 0; i < count; ++i) {
