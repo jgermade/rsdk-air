@@ -707,6 +707,11 @@ struct GameMenu::Impl {
         SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
         if (SDL_GetNumTouchDevices() > 0)
             touch_supported = true;
+        // A pad already connected: start with the controls hidden (a touch shows them).
+        for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+            if (SDL_IsGameController(i))
+                pad_mode = true;
+        }
         apply_touch();
         if (start)
             run(true);
@@ -827,14 +832,15 @@ struct GameMenu::Impl {
         const ImVec2 s = window_size();
         const float u = std::clamp(std::min(s.x, s.y) / 720.0f, 0.5f, 3.0f);
         const float k = touch_size == 0 ? 0.8f : touch_size == 2 ? 1.25f : 1.0f;
-        const float margin = 44.0f * u;
+        const float side = 48.0f * u, bottom = 96.0f * u;  // raised from the bottom edge
         ControlsLayout l;
         l.pad_r = 96.0f * u * k;
-        l.pad = ImVec2(margin + l.pad_r, s.y - margin - l.pad_r);
+        l.pad = ImVec2(side + l.pad_r, s.y - bottom - l.pad_r);
         l.jump_r = 62.0f * u * k;
-        l.jump = ImVec2(s.x - margin - l.jump_r, s.y - margin - l.jump_r);
+        l.jump = ImVec2(s.x - side - l.jump_r, s.y - bottom - l.jump_r);
+        // Top right, but in from the corner: the games put counters (lives…) there.
         l.pause_r = 26.0f * u * k;
-        l.pause = ImVec2(s.x - 30.0f * u - l.pause_r, 30.0f * u + l.pause_r);
+        l.pause = ImVec2(s.x - 190.0f * u - l.pause_r, 30.0f * u + l.pause_r);
         return l;
     }
 
@@ -850,7 +856,21 @@ struct GameMenu::Impl {
             if (e.key.keysym.sym != SDLK_AC_BACK)
                 pad_mode = true;  // a keyboard: hide the controls
             return false;
-        case SDL_CONTROLLERBUTTONDOWN: pad_mode = true; return false;
+        // A pad in use hides the controls until the screen is touched again: recognised
+        // pads (game controller events) and generic ones (joystick buttons, hat, sticks).
+        // Android also lists the accelerometer as a joystick; it has no buttons or hat and
+        // its axes are ignored here.
+        case SDL_CONTROLLERBUTTONDOWN:
+        case SDL_JOYBUTTONDOWN:
+        case SDL_CONTROLLERDEVICEADDED: pad_mode = true; return false;
+        case SDL_JOYHATMOTION:
+            if (e.jhat.value != SDL_HAT_CENTERED)
+                pad_mode = true;
+            return false;
+        case SDL_CONTROLLERAXISMOTION:
+            if (e.caxis.value > 16000 || e.caxis.value < -16000)
+                pad_mode = true;
+            return false;
         case SDL_MOUSEBUTTONDOWN:
         case SDL_MOUSEBUTTONUP:
             // SDL's mouse copy of a touch never reaches the game while the controls are
