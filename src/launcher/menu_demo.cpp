@@ -22,32 +22,44 @@
 namespace {
 
 bool g_running = true;
-int g_music = 80, g_sound = 100, g_smooth = 0, g_fullscreen = 0;
+// The settings a desktop RSDKv4 module offers, so the settings screen looks the same
+// (two of them apply on the next start; the list is long enough to scroll on small windows).
+int g_values[9] = {80, 100, 0, 0, 0, 0, 1, 1, 1};
 std::vector<int> g_ram(rsdkair::rsdkv4::kSaveRamInts, 0);
 
 const char *const kSmooth[] = {"Sharp pixels", "Smooth", nullptr};
 const char *const kOnOff[] = {"Off", "On", nullptr};
+const char *const kLanguages[] = {"English", "French", "Italian", "German", "Spanish", "Japanese", nullptr};
+const char *const kScales[] = {"1x", "2x", "3x", "4x", nullptr};
+const char *const kWidths[] = {"4:3 (320)", "Widescreen (424)", nullptr};
 const char *const kScreens[] = {"Level select", "Stage menu"};
 
-int setting_count() { return 4; }
+int setting_count() { return 9; }
 
 int setting_get(int i, RsdkAirSetting *s)
 {
     *s = RsdkAirSetting{};
+    if (i < 0 || i >= 9)
+        return 0;
+    const int v = g_values[i];
     switch (i) {
-    case 0: *s = {"Music volume", RSDKAIR_SETTING_RANGE, 0, 100, 10, nullptr, g_music}; return 1;
-    case 1: *s = {"Sound volume", RSDKAIR_SETTING_RANGE, 0, 100, 10, nullptr, g_sound}; return 1;
-    case 2: *s = {"Smoothing", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kSmooth, g_smooth}; return 1;
-    case 3: *s = {"Fullscreen", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff, g_fullscreen}; return 1;
-    default: return 0;
+    case 0: *s = {"Music volume", RSDKAIR_SETTING_RANGE, 0, 100, 10, nullptr, v, 0}; break;
+    case 1: *s = {"Sound volume", RSDKAIR_SETTING_RANGE, 0, 100, 10, nullptr, v, 0}; break;
+    case 2: *s = {"Language", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kLanguages, v, 1}; break;
+    case 3: *s = {"Smoothing", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kSmooth, v, 0}; break;
+    case 4: *s = {"Fullscreen", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff, v, 0}; break;
+    case 5: *s = {"VSync", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff, v, 0}; break;
+    case 6: *s = {"Window size", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kScales, v, 0}; break;
+    case 7: *s = {"Screen width", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kWidths, v, 1}; break;
+    case 8: *s = {"Pause when in background", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff, v, 0}; break;
     }
+    return 1;
 }
 
 void setting_set(int i, int v)
 {
-    int *targets[] = {&g_music, &g_sound, &g_smooth, &g_fullscreen};
-    if (i >= 0 && i < 4)
-        *targets[i] = v;
+    if (i >= 0 && i < 9)
+        g_values[i] = v;
     std::printf("setting %d = %d\n", i, v);
 }
 

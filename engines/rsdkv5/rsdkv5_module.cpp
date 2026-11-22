@@ -54,6 +54,7 @@ rsdkair_menu::Glue g_menu;
 unsigned g_pad = 0;  // on-screen controls held (RSDKAIR_PAD_*)
 bool g_started = false;
 std::filesystem::path g_rsdkair_ini;  // <save>/rsdk-air.ini: settings the engine has no key for
+std::filesystem::path g_settings_ini;  // <save>/Settings.ini, the engine's own
 int g_smooth = 0;
 
 // Mania's own screens, scenes of its "Presentation" category.
@@ -93,53 +94,137 @@ void apply_smoothing()
     }
 }
 
+// Settings, saved in the engine's Settings.ini by its own SaveSettingsINI() (smoothing in
+// rsdk-air.ini). Language and screen width are read only when the engine starts: they are
+// written to Settings.ini (again after each save and when the engine quits, as it writes
+// the running values back) and the engine picks them up the next time the game starts.
+// The screen width also stays in rsdk-air.ini: SaveSettingsINI() drops pixWidth when the
+// file already has it, so it is put back before every start.
+int g_language = -1;   // chosen for the next start, -1 none
+int g_pix_width = -1;  // chosen (now or in an earlier session), -1 none
+
 const char *const kSmoothing[] = {"Sharp pixels", "Smooth", nullptr};
 const char *const kOnOff[] = {"Off", "On", nullptr};
+const char *const kLanguages[] = {"English",  "French", "Italian", "German", "Spanish", "Japanese", "Korean",
+                                  "Chinese (Simplified)", "Chinese (Traditional)", nullptr};
+constexpr int kLastLanguage = RSDK::LANGUAGE_TC;
+const char *const kWidths[] = {"4:3 (320)", "Widescreen (424)", nullptr};
+const int kWidthValues[] = {320, DEFAULT_PIXWIDTH};
+const char *const kScales[] = {"1x", "2x", "3x", "4x", nullptr};
+
+enum Setting { Music, Sound, Language, Smoothing, Fullscreen, VSync, WindowSize, ScreenWidth, FocusPause };
 #if defined(__ANDROID__)
-constexpr int kSettingCount = 3;
+const Setting kSettings[] = {Music, Sound, Language, Smoothing};
 #else
-constexpr int kSettingCount = 5;
+const Setting kSettings[] = {Music, Sound, Language, Smoothing, Fullscreen, VSync, WindowSize, ScreenWidth, FocusPause};
 #endif
+constexpr int kSettingCount = static_cast<int>(sizeof(kSettings) / sizeof(kSettings[0]));
+
+int width_choice(int width) { return width <= 360 ? 0 : 1; }
+
+int current_language()
+{
+#if RETRO_REV02
+    return RSDK::SKU::curSKU.language;
+#else
+    return RSDK::gameVerInfo.language;
+#endif
+}
+
+int window_scale()
+{
+    const int scale = (RSDK::videoSettings.windowHeight + SCREEN_YSIZE / 2) / SCREEN_YSIZE;
+    return scale < 1 ? 1 : scale > 4 ? 4 : scale;
+}
 
 int setting_get(int i, RsdkAirSetting *s)
 {
     *s = RsdkAirSetting{};
+    if (i < 0 || i >= kSettingCount)
+        return 0;
     const int music = static_cast<int>(RSDK::engine.streamVolume * 100.0f + 0.5f);
     const int sound = static_cast<int>(RSDK::engine.soundFXVolume * 100.0f + 0.5f);
-    switch (i) {
-    case 0: *s = {"Music volume", RSDKAIR_SETTING_RANGE, 0, 100, 10, nullptr, music}; return 1;
-    case 1: *s = {"Sound volume", RSDKAIR_SETTING_RANGE, 0, 100, 10, nullptr, sound}; return 1;
-    case 2: *s = {"Smoothing", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kSmoothing, g_smooth}; return 1;
-    case 3: *s = {"Fullscreen", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff, RSDK::videoSettings.windowed ? 0 : 1}; return 1;
-    case 4: *s = {"VSync", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff, RSDK::videoSettings.vsync ? 1 : 0}; return 1;
-    default: return 0;
+    switch (kSettings[i]) {
+    case Music: *s = {"Music volume", RSDKAIR_SETTING_RANGE, 0, 100, 10, nullptr, music, 0}; return 1;
+    case Sound: *s = {"Sound volume", RSDKAIR_SETTING_RANGE, 0, 100, 10, nullptr, sound, 0}; return 1;
+    case Language: {
+        const int lang = g_language >= 0 ? g_language : current_language();
+        *s = {"Language", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kLanguages, lang >= 0 && lang <= kLastLanguage ? lang : 0, 1};
+        return 1;
     }
+    case Smoothing: *s = {"Smoothing", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kSmoothing, g_smooth, 0}; return 1;
+    case Fullscreen:
+        *s = {"Fullscreen", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff, RSDK::videoSettings.windowed ? 0 : 1, 0};
+        return 1;
+    case VSync: *s = {"VSync", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff, RSDK::videoSettings.vsync ? 1 : 0, 0}; return 1;
+    case WindowSize: *s = {"Window size", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kScales, window_scale() - 1, 0}; return 1;
+    case ScreenWidth: {
+        const int width = g_pix_width >= 0 ? g_pix_width : RSDK::videoSettings.pixWidth;
+        *s = {"Screen width", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kWidths, width_choice(width), 1};
+        return 1;
+    }
+    case FocusPause:
+        *s = {"Pause when in background", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff,
+              RSDK::customSettings.disableFocusPause ? 0 : 1, 0};
+        return 1;
+    }
+    return 0;
+}
+
+// The choices for the next start, over what the engine wrote.
+void apply_pending()
+{
+    if (g_settings_ini.empty())
+        return;
+    if (g_language >= 0)
+        rsdkair::ini_set_file(g_settings_ini, "Game", "language", std::to_string(g_language));
+    if (g_pix_width >= 0)
+        rsdkair::ini_set_file(g_settings_ini, "Video", "pixWidth", std::to_string(g_pix_width));
 }
 
 void setting_set(int i, int v)
 {
-    switch (i) {
-    case 0: RSDK::engine.streamVolume = static_cast<float>(v) / 100.0f; break;
-    case 1: RSDK::engine.soundFXVolume = static_cast<float>(v) / 100.0f; break;
-    case 2:
+    if (i < 0 || i >= kSettingCount)
+        return;
+    switch (kSettings[i]) {
+    case Music: RSDK::engine.streamVolume = static_cast<float>(v) / 100.0f; break;
+    case Sound: RSDK::engine.soundFXVolume = static_cast<float>(v) / 100.0f; break;
+    case Language: g_language = v < 0 ? 0 : v > kLastLanguage ? kLastLanguage : v; break;
+    case Smoothing:
         g_smooth = v ? 1 : 0;
         apply_smoothing();
         rsdkair::ini_set_file(g_rsdkair_ini, "Video", "Smooth", g_smooth ? "true" : "false");
         return;
-    case 3:
+    case Fullscreen:
         // Not the engine's UpdateGameWindow(): it re-creates the renderer the menu is
         // drawing with. The window changes in place; the logical size rescales.
         RSDK::videoSettings.windowed = v ? 0 : 1;
         SDL_SetWindowFullscreen(RSDK::RenderDevice::window, v ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
         break;
-    case 4:
+    case VSync:
         // In place, as fullscreen; the engine's own 60 FPS cap stays on either way.
         RSDK::videoSettings.vsync = v ? 1 : 0;
         SDL_RenderSetVSync(RSDK::RenderDevice::renderer, v ? 1 : 0);
         break;
-    default: return;
+    case WindowSize: {
+        // In place too: the window is resized and the logical size rescales.
+        const int scale = (v < 0 ? 0 : v > 3 ? 3 : v) + 1;
+        RSDK::videoSettings.windowWidth = RSDK::videoSettings.pixWidth * scale;
+        RSDK::videoSettings.windowHeight = SCREEN_YSIZE * scale;
+        if (RSDK::videoSettings.windowed) {
+            SDL_SetWindowSize(RSDK::RenderDevice::window, RSDK::videoSettings.windowWidth, RSDK::videoSettings.windowHeight);
+            SDL_SetWindowPosition(RSDK::RenderDevice::window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+        }
+        break;
+    }
+    case ScreenWidth:
+        g_pix_width = kWidthValues[v ? 1 : 0];
+        rsdkair::ini_set_file(g_rsdkair_ini, "Video", "PixWidth", std::to_string(g_pix_width));
+        break;
+    case FocusPause: RSDK::customSettings.disableFocusPause = v ? false : true; break;
     }
     RSDK::SaveSettingsINI(true);
+    apply_pending();
 }
 
 void setup_menu(const RsdkAirHost *host)
@@ -260,7 +345,8 @@ RSDKAIR_EXPORT int rsdkair_engine_main(const RsdkAirEngineArgs *args)
 
     // Settings.ini is the engine's own file; only the key rsdk-air owns is set here. When
     // the file is new, the engine fills in its defaults for every other key.
-    const fs::path settings = save_dir / "Settings.ini";
+    const fs::path settings = fs::absolute(save_dir / "Settings.ini", ec);
+    g_settings_ini = settings;
     if (!rsdkair::ini_set_file(settings, "Game", "dataFile", data_file_text)) {
         std::fprintf(stderr, "rsdkv5: cannot write %s\n", rsdkair::path_to_utf8(settings).c_str());
         return RSDKAIR_EXIT_ENGINE_FAILED;
@@ -292,7 +378,11 @@ RSDKAIR_EXPORT int rsdkair_engine_main(const RsdkAirEngineArgs *args)
         std::ifstream in(g_rsdkair_ini);
         const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
         g_smooth = rsdkair::ini_get(text, "Video", "Smooth") == "true" ? 1 : 0;
+        const std::string pix_width = rsdkair::ini_get(text, "Video", "PixWidth");
+        if (pix_width == "320" || pix_width == "424")
+            g_pix_width = std::stoi(pix_width);
     }
+    apply_pending();  // the screen width chosen earlier, before the engine reads it
     setup_menu(args->host);
 
     // What upstream's RSDK_main (main.cpp) does, with the game logic linked statically.
@@ -300,6 +390,7 @@ RSDKAIR_EXPORT int rsdkair_engine_main(const RsdkAirEngineArgs *args)
     RSDK::InitCoreAPI();
     const int code = RSDK::RunRetroEngine(0, nullptr);
     RSDK::ReleaseCoreAPI();
+    apply_pending();  // the engine may write its settings when it quits
     return code == 0 ? RSDKAIR_EXIT_OK : RSDKAIR_EXIT_ENGINE_FAILED;
 }
 

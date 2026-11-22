@@ -78,47 +78,137 @@ void find_screens()
     }
 }
 
+// Settings, saved in the engine's settings.ini by its own WriteSettings(). Language and
+// screen width are read only when the engine starts: they are written to settings.ini
+// (again after each WriteSettings(), which would write the running values back) and the
+// engine picks them up the next time the game starts.
+std::filesystem::path g_settings_ini;
+int g_language = -1;      // chosen for the next start, -1 none
+int g_screen_width = -1;  // chosen for the next start, -1 none
+
 const char *const kSmoothing[] = {"Sharp pixels", "Smooth", nullptr};
 const char *const kOnOff[] = {"Off", "On", nullptr};
+const char *const kLanguages[] = {"English", "French", "Italian", "German", "Spanish", "Japanese", nullptr};
+const char *const kWidths[] = {"4:3 (320)", "Widescreen (424)", nullptr};
+const int kWidthValues[] = {320, 424};
+const char *const kScales[] = {"1x", "2x", "3x", "4x", nullptr};
+const char *const kSpinDash[] = {"Sonic 2 style", "Sonic CD style", nullptr};
+
+enum Setting { Music, Sound, Language, Smoothing, Fullscreen, VSync, WindowSize, ScreenWidth, FocusPause, SpinDash };
 #if RETRO_PLATFORM == RETRO_ANDROID
-constexpr int kSettingCount = 3;
+const Setting kSettings[] = {Music, Sound, Language, Smoothing, SpinDash};
 #else
-constexpr int kSettingCount = 5;
+const Setting kSettings[] = {Music, Sound,      Language,    Smoothing,  Fullscreen,
+                             VSync, WindowSize, ScreenWidth, FocusPause, SpinDash};
 #endif
+constexpr int kSettingCount = static_cast<int>(sizeof(kSettings) / sizeof(kSettings[0]));
+
+// DisableFocusPause: 0 pauses when the window loses focus; 2 never pauses (RSDKv3's
+// RetroEngine.cpp tests (value + 1) & 1 and & 2).
+constexpr int kNoFocusPause = 2;
+
+int width_choice(int width) { return width <= 360 ? 0 : 1; }
+
+// Spin dash style: the engine's OriginalControls (-1 lets the save decide), else the
+// game's own option.
+int spin_dash()
+{
+    if (controlMode >= 0)
+        return controlMode ? 1 : 0;
+    return GetGlobalVariableByName("Options.OriginalControls") ? 1 : 0;
+}
 
 int setting_get(int i, RsdkAirSetting *s)
 {
     *s = RsdkAirSetting{};
-    switch (i) {
-    case 0: *s = {"Music volume", RSDKAIR_SETTING_RANGE, 0, MAX_VOLUME, 10, nullptr, bgmVolume}; return 1;
-    case 1: *s = {"Sound volume", RSDKAIR_SETTING_RANGE, 0, MAX_VOLUME, 10, nullptr, sfxVolume}; return 1;
-    case 2: *s = {"Smoothing", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kSmoothing, Engine.scalingMode ? 1 : 0}; return 1;
-    case 3: *s = {"Fullscreen", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff, Engine.isFullScreen ? 1 : 0}; return 1;
-    case 4: *s = {"VSync", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff, Engine.vsync ? 1 : 0}; return 1;
-    default: return 0;
+    if (i < 0 || i >= kSettingCount)
+        return 0;
+    switch (kSettings[i]) {
+    case Music: *s = {"Music volume", RSDKAIR_SETTING_RANGE, 0, MAX_VOLUME, 10, nullptr, bgmVolume, 0}; return 1;
+    case Sound: *s = {"Sound volume", RSDKAIR_SETTING_RANGE, 0, MAX_VOLUME, 10, nullptr, sfxVolume, 0}; return 1;
+    case Language: {
+        const int lang = g_language >= 0 ? g_language : Engine.language;
+        *s = {"Language", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kLanguages, lang >= 0 && lang <= 5 ? lang : 0, 1};
+        return 1;
     }
+    case Smoothing: *s = {"Smoothing", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kSmoothing, Engine.scalingMode ? 1 : 0, 0}; return 1;
+    case Fullscreen: *s = {"Fullscreen", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff, Engine.isFullScreen ? 1 : 0, 0}; return 1;
+    case VSync: *s = {"VSync", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff, Engine.vsync ? 1 : 0, 0}; return 1;
+    case WindowSize: {
+        const int scale = Engine.windowScale < 1 ? 1 : Engine.windowScale > 4 ? 4 : Engine.windowScale;
+        *s = {"Window size", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kScales, scale - 1, 0};
+        return 1;
+    }
+    case ScreenWidth: {
+        const int width = g_screen_width >= 0 ? g_screen_width : SCREEN_XSIZE_CONFIG;
+        *s = {"Screen width", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kWidths, width_choice(width), 1};
+        return 1;
+    }
+    case FocusPause:
+        *s = {"Pause when in background", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff, disableFocusPause_Config == 0 ? 1 : 0, 0};
+        return 1;
+    case SpinDash: *s = {"Spin dash", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kSpinDash, spin_dash(), 0}; return 1;
+    }
+    return 0;
 }
 
 int clamp_volume(int v) { return v < 0 ? 0 : v > MAX_VOLUME ? MAX_VOLUME : v; }
 
+// The choices for the next start, over what the engine wrote.
+void apply_pending()
+{
+    if (g_settings_ini.empty())
+        return;
+    if (g_language >= 0)
+        rsdkair::ini_set_file(g_settings_ini, "Game", "Language", std::to_string(g_language));
+    if (g_screen_width >= 0)
+        rsdkair::ini_set_file(g_settings_ini, "Window", "ScreenWidth", std::to_string(g_screen_width));
+}
+
+void save_settings()
+{
+    WriteSettings();
+    apply_pending();
+}
+
 void setting_set(int i, int v)
 {
-    switch (i) {
-    case 0: bgmVolume = clamp_volume(v); break;
-    case 1: sfxVolume = clamp_volume(v); break;
-    case 2: Engine.scalingMode = v ? 1 : 0; break;
-    case 3:
+    if (i < 0 || i >= kSettingCount)
+        return;
+    switch (kSettings[i]) {
+    case Music: bgmVolume = clamp_volume(v); break;
+    case Sound: sfxVolume = clamp_volume(v); break;
+    case Language: g_language = v < 0 ? 0 : v > 5 ? 5 : v; break;
+    case Smoothing: Engine.scalingMode = v ? 1 : 0; break;
+    case Fullscreen:
         Engine.startFullScreen = v != 0;
         SetFullScreen(v != 0);
         break;
-    case 4:
+    case VSync:
         // The engine's GL context is current here (the menu runs inside its frame).
         Engine.vsync = v != 0;
         SDL_GL_SetSwapInterval(Engine.vsync ? 1 : 0);
         break;
+    case WindowSize:
+        Engine.windowScale = (v < 0 ? 0 : v > 3 ? 3 : v) + 1;
+        if (!Engine.isFullScreen)
+            SetFullScreen(false);  // resizes the window and the viewport
+        break;
+    case ScreenWidth: g_screen_width = kWidthValues[v ? 1 : 0]; break;
+    case FocusPause:
+        disableFocusPause_Config = v ? 0 : kNoFocusPause;
+        disableFocusPause = disableFocusPause_Config;
+        break;
+    case SpinDash:
+        // Now (the game's option and its save, written with the game's next save) and
+        // from now on (OriginalControls overrides the save at every start).
+        controlMode = v ? 1 : 0;
+        saveRAM[35] = controlMode;
+        SetGlobalVariableByName("Options.OriginalControls", controlMode);
+        break;
     default: return;
     }
-    WriteSettings();
+    save_settings();
 }
 
 void setup_menu(const RsdkAirHost *host)
@@ -235,7 +325,8 @@ RSDKAIR_EXPORT int rsdkair_engine_main(const RsdkAirEngineArgs *args)
 #else
     const char *hide_touch_pad = "true";
 #endif
-    const fs::path settings = save_dir / "settings.ini";
+    const fs::path settings = fs::absolute(save_dir / "settings.ini", ec);
+    g_settings_ini = settings;
     if (!rsdkair::ini_set_file(settings, "Dev", "DataFile", data_file_text) ||
         !rsdkair::ini_set_file(settings, "Game", "DisableTouchControls", hide_touch_pad)) {
         std::fprintf(stderr, "rsdkv3: cannot write %s\n", rsdkair::path_to_utf8(settings).c_str());
@@ -262,6 +353,7 @@ RSDKAIR_EXPORT int rsdkair_engine_main(const RsdkAirEngineArgs *args)
     g_menu.attach(Engine.window, true);  // the start screen: play, screens, settings
     if (Engine.running)                  // unless the player went back to the launcher from it
         Engine.Run();
+    apply_pending();  // the engine writes its settings when it quits
     return RSDKAIR_EXIT_OK;
 }
 

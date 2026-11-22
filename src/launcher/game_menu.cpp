@@ -618,6 +618,9 @@ struct GameMenu::Impl {
         ImVec2 min, max, less_min, less_max, more_min, more_max;
     };
     std::vector<Row> rows;  // settings rows; the last is Back
+    float settings_scroll = 0.0f;       // how far the settings rows are scrolled
+    float settings_scroll_step = 0.0f;  // one row, for the mouse wheel
+    int scroll_focus = -1;              // the focus the scroll last followed
     ImVec2 dialog_rects[4];
 
     // ---- On-screen controls ----
@@ -1069,9 +1072,9 @@ struct GameMenu::Impl {
         static const char *const kOnOff[] = {"Off", "On", nullptr};
         static const char *const kSizes[] = {"Small", "Medium", "Large", nullptr};
         switch (i - n) {
-        case 0: s = {"On-screen controls", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff, touch_enabled ? 1 : 0}; return true;
-        case 1: s = {"Controls size", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kSizes, touch_size}; return true;
-        case 2: s = {"Controls opacity", RSDKAIR_SETTING_RANGE, 20, 100, 20, nullptr, touch_opacity}; return true;
+        case 0: s = {"On-screen controls", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff, touch_enabled ? 1 : 0, 0}; return true;
+        case 1: s = {"Controls size", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kSizes, touch_size, 0}; return true;
+        case 2: s = {"Controls opacity", RSDKAIR_SETTING_RANGE, 20, 100, 20, nullptr, touch_opacity, 0}; return true;
         default: return false;
         }
     }
@@ -1326,6 +1329,10 @@ struct GameMenu::Impl {
             if (e.window.event == SDL_WINDOWEVENT_LEAVE)
                 pointer_on = false;
             break;
+        case SDL_MOUSEWHEEL:
+            if (screen == Screen::Settings && e.wheel.y != 0)
+                settings_scroll -= static_cast<float>(e.wheel.y) * settings_scroll_step;  // clamped when drawn
+            break;
         case SDL_FINGERDOWN:
             if (e.tfinger.touchId != SDL_MOUSE_TOUCHID)  // a real finger, not the mouse as a touch
                 pointer_on = false;
@@ -1474,6 +1481,8 @@ struct GameMenu::Impl {
         case Kind::Settings:
             screen = Screen::Settings;
             focus = 0;
+            settings_scroll = 0.0f;
+            scroll_focus = -1;
             break;
         case Kind::Exit:
             if (starting) {
@@ -2182,35 +2191,66 @@ struct GameMenu::Impl {
         const ImVec2 size = ImGui::GetIO().DisplaySize;
         const int count = setting_count();
         const float w = std::min(560.0f * u, size.x * 0.92f), pad = 26.0f * u;
-        const float row_h = 52.0f * u, row_gap = 8.0f * u;
-        const float h = pad + 40.0f * u + static_cast<float>(count + 1) * (row_h + row_gap) + pad;
+        const float row_h = 52.0f * u, row_gap = 8.0f * u, step = row_h + row_gap;
+        const float content = static_cast<float>(count + 1) * step - row_gap;
+        const float h = pad + 40.0f * u + content + pad;
         ImVec2 min, max;
-        panel(dl, u, w, std::min(h, size.y - 20.0f * u), min, max);
+        panel(dl, u, w, std::min(h, size.y - 90.0f * u), min, max);  // room for the hints below
         text(dl, font_bold, 26.0f * u, ImVec2(min.x + pad, min.y + pad - 4.0f * u), IM_COL32_WHITE, "Settings");
         rows.assign(static_cast<std::size_t>(count + 1), Row{});
         focus = std::clamp(focus, 0, count);
-        float y = min.y + pad + 40.0f * u;
-        for (int i = 0; i <= count; ++i) {
+
+        // The rows scroll when they do not fit (many settings, small screens): the focused
+        // row is kept in view, and the mouse wheel scrolls too.
+        const float top = min.y + pad + 40.0f * u, bottom = max.y - pad;
+        const float view = bottom - top;
+        const float scroll_max = std::max(0.0f, content - view);
+        if (focus != scroll_focus) {
+            scroll_focus = focus;
+            const float fy = static_cast<float>(focus) * step;
+            if (fy < settings_scroll)
+                settings_scroll = fy;
+            else if (fy + row_h > settings_scroll + view)
+                settings_scroll = fy + row_h - view;
+        }
+        settings_scroll = std::clamp(settings_scroll, 0.0f, scroll_max);
+        settings_scroll_step = step;
+        dl->PushClipRect(ImVec2(min.x, top - 4.0f * u), ImVec2(max.x, bottom + 4.0f * u), true);
+
+        float y = top - settings_scroll;
+        for (int i = 0; i <= count; ++i, y += step) {
+            if (y + row_h < top || y > bottom)
+                continue;  // out of view: no tap targets either
             Row &r = rows[static_cast<std::size_t>(i)];
-            r.min = ImVec2(min.x + pad, y);
-            r.max = ImVec2(max.x - pad, y + row_h);
+            r.min = ImVec2(min.x + pad, std::max(y, top));
+            r.max = ImVec2(max.x - pad, std::min(y + row_h, bottom));
+            const ImVec2 rmin(r.min.x, y), rmax(r.max.x, y + row_h);  // the whole row, for drawing
             const bool f = focus == i;
             const bool h = hover(r.min, r.max);
-            dl->AddRectFilled(r.min, r.max, f ? IM_COL32_WHITE : h ? rgba(255, 255, 255, 46) : rgba(255, 255, 255, 13),
+            dl->AddRectFilled(rmin, rmax, f ? IM_COL32_WHITE : h ? rgba(255, 255, 255, 46) : rgba(255, 255, 255, 13),
                               14.0f * u);
             if (h && !f)
-                dl->AddRect(r.min, r.max, rgba(255, 255, 255, 90), 14.0f * u, 1.5f * u);
+                dl->AddRect(rmin, rmax, rgba(255, 255, 255, 90), 14.0f * u, 1.5f * u);
             const ImU32 fg = f ? rgba(0x0b, 0x0d, 0x12) : IM_COL32_WHITE;
             if (i == count) {
                 const ImVec2 ls = measure(font_bold, 16.0f * u, "Back");
-                text(dl, font_bold, 16.0f * u, ImVec2((r.min.x + r.max.x - ls.x) / 2, y + (row_h - ls.y) / 2), fg, "Back");
+                text(dl, font_bold, 16.0f * u, ImVec2((rmin.x + rmax.x - ls.x) / 2, y + (row_h - ls.y) / 2), fg, "Back");
                 break;
             }
             RsdkAirSetting s{};
             setting_get(i, s);
             const std::string label = s.label ? s.label : "";
             const ImVec2 ls = measure(font_bold, 16.0f * u, label);
-            text(dl, font_bold, 16.0f * u, ImVec2(r.min.x + 16.0f * u, y + (row_h - ls.y) / 2), fg, label);
+            if (s.restart) {  // label and, under it, when the change applies
+                const char *note = "Applies the next time the game starts";
+                const ImVec2 ns = measure(font_regular, 11.5f * u, note);
+                const float ty = y + (row_h - ls.y - ns.y - 2.0f * u) / 2;
+                text(dl, font_bold, 16.0f * u, ImVec2(rmin.x + 16.0f * u, ty), fg, label);
+                text(dl, font_regular, 11.5f * u, ImVec2(rmin.x + 16.0f * u, ty + ls.y + 2.0f * u),
+                     f ? rgba(0x0b, 0x0d, 0x12, 150) : rgba(0x8e, 0x97, 0xa9), note);
+            } else {
+                text(dl, font_bold, 16.0f * u, ImVec2(rmin.x + 16.0f * u, y + (row_h - ls.y) / 2), fg, label);
+            }
             std::string value;
             if (s.kind == RSDKAIR_SETTING_RANGE) {
                 value = std::to_string(s.value) + (s.max == 100 ? "%" : "");
@@ -2223,15 +2263,18 @@ struct GameMenu::Impl {
             }
             // < value >, arrows as tap targets.
             const float arrow = 36.0f * u;
-            r.more_max = ImVec2(r.max.x - 6.0f * u, r.max.y - 6.0f * u);
-            r.more_min = ImVec2(r.more_max.x - arrow, r.min.y + 6.0f * u);
+            const ImVec2 more_max(rmax.x - 6.0f * u, rmax.y - 6.0f * u), more_min(more_max.x - arrow, rmin.y + 6.0f * u);
             const ImVec2 vs = measure(font_regular, 15.0f * u, value);
-            const float vx = r.more_min.x - 8.0f * u - vs.x;
-            r.less_max = ImVec2(vx - 8.0f * u, r.more_max.y);
-            r.less_min = ImVec2(r.less_max.x - arrow, r.more_min.y);
+            const float vx = more_min.x - 8.0f * u - vs.x;
+            const ImVec2 less_max(vx - 8.0f * u, more_max.y), less_min(less_max.x - arrow, more_min.y);
             text(dl, font_regular, 15.0f * u, ImVec2(vx, y + (row_h - vs.y) / 2), fg, value);
-            auto tri = [&](ImVec2 bmin, ImVec2 bmax, bool left) {
-                if (hover(bmin, bmax))
+            auto clip = [&](ImVec2 a) { return ImVec2(a.x, std::clamp(a.y, top, bottom)); };
+            r.more_min = clip(more_min);
+            r.more_max = clip(more_max);
+            r.less_min = clip(less_min);
+            r.less_max = clip(less_max);
+            auto tri = [&](ImVec2 bmin, ImVec2 bmax, ImVec2 hmin, ImVec2 hmax, bool left) {
+                if (hover(hmin, hmax))
                     dl->AddRectFilled(bmin, bmax, f ? rgba(0x0b, 0x0d, 0x12, 40) : rgba(255, 255, 255, 40), 10.0f * u);
                 const ImVec2 c((bmin.x + bmax.x) / 2, (bmin.y + bmax.y) / 2);
                 const float a = 6.0f * u;
@@ -2240,9 +2283,16 @@ struct GameMenu::Impl {
                 else
                     dl->AddTriangleFilled(ImVec2(c.x + a, c.y), ImVec2(c.x - a * 0.6f, c.y - a), ImVec2(c.x - a * 0.6f, c.y + a), fg);
             };
-            tri(r.less_min, r.less_max, true);
-            tri(r.more_min, r.more_max, false);
-            y += row_h + row_gap;
+            tri(less_min, less_max, r.less_min, r.less_max, true);
+            tri(more_min, more_max, r.more_min, r.more_max, false);
+        }
+        dl->PopClipRect();
+
+        if (scroll_max > 0.0f) {  // a thin scroll bar on the panel's right edge
+            const float bx = max.x - 10.0f * u, bh = view * view / content;
+            const float by = top + (view - bh) * (settings_scroll / scroll_max);
+            dl->AddRectFilled(ImVec2(bx, top), ImVec2(bx + 4.0f * u, bottom), rgba(255, 255, 255, 18), 2.0f * u);
+            dl->AddRectFilled(ImVec2(bx, by), ImVec2(bx + 4.0f * u, by + bh), rgba(255, 255, 255, 110), 2.0f * u);
         }
         std::vector<Hint> hints = {{nullptr, 0, "Left/Right", "Change"}, {"B", rgba(240, 110, 110), "Esc", "Back"}};
         draw_hints(dl, u, std::min(size.y - 26.0f * u, max.y + 30.0f * u), hints);
