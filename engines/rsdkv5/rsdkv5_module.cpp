@@ -260,6 +260,17 @@ RSDKAIR_EXPORT int rsdkair_engine_main(const RsdkAirEngineArgs *args)
         return RSDKAIR_EXIT_ENGINE_FAILED;
     }
 
+#if defined(__ANDROID__)
+    // Fullscreen on Android, as upstream's RETRO_ANDROID branch of the SDL2 render device
+    // does (skipped here: the module is built as the Linux flavour). In a window the engine
+    // draws into its 424x240 window size in a corner of the screen.
+    if (!rsdkair::ini_set_file(settings, "Video", "windowed", "n") ||
+        !rsdkair::ini_set_file(settings, "Video", "exclusiveFS", "n")) {
+        std::fprintf(stderr, "rsdkv5: cannot write %s\n", rsdkair::path_to_utf8(settings).c_str());
+        return RSDKAIR_EXIT_ENGINE_FAILED;
+    }
+#endif
+
     // Linux ("./") and Windows ("") resolve the user file directory against the working
     // directory; macOS and Android get the folder itself (patched UserStorage.cpp).
     g_user_dir = rsdkair::path_to_utf8(save_dir) + "/";

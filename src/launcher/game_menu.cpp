@@ -190,8 +190,12 @@ public:
     void sizes(ImVec2 &window, ImVec2 &framebuffer) override
     {
         int w = 0, h = 0, fw = 0, fh = 0;
-        SDL_GetWindowSize(window_, &w, &h);
         SDL_GL_GetDrawableSize(window_, &fw, &fh);
+#if defined(__ANDROID__)
+        w = fw, h = fh;  // window units are pixels; the window size an engine set may be stale
+#else
+        SDL_GetWindowSize(window_, &w, &h);
+#endif
         window = ImVec2(static_cast<float>(w), static_cast<float>(h));
         framebuffer = ImVec2(static_cast<float>(fw), static_cast<float>(fh));
     }
@@ -448,8 +452,12 @@ public:
     {
         save();
         int w = 0, h = 0, fw = 0, fh = 0;
-        SDL_GetWindowSize(window_, &w, &h);
         SDL_GetRendererOutputSize(renderer_, &fw, &fh);
+#if defined(__ANDROID__)
+        w = fw, h = fh;  // window units are pixels; the window size an engine set may be stale
+#else
+        SDL_GetWindowSize(window_, &w, &h);
+#endif
         window = ImVec2(static_cast<float>(w), static_cast<float>(h));
         framebuffer = ImVec2(static_cast<float>(fw), static_cast<float>(fh));
     }
@@ -805,11 +813,13 @@ struct GameMenu::Impl {
         float pause_r;
     };
 
+    // The window in the units of the menu and of touches (normalised to the window).
     ImVec2 window_size() const
     {
-        int w = 0, h = 0;
-        SDL_GetWindowSize(static_cast<SDL_Window *>(control->window), &w, &h);
-        return ImVec2(static_cast<float>(w), static_cast<float>(h));
+        ImVec2 window, fb;
+        renderer->sizes(window, fb);
+        renderer->end();  // sizes() may save engine state (SDL renderer); nothing drawn here
+        return window;
     }
 
     ControlsLayout controls_layout() const
@@ -918,13 +928,16 @@ struct GameMenu::Impl {
                     const float dx = f.pos.x - l.pad.x, dy = f.pos.y - l.pad.y;
                     if (std::sqrt(dx * dx + dy * dy) < l.pad_r * 0.22f)
                         continue;  // dead zone in the middle
-                    const float angle = std::atan2(-dy, dx);  // 0 right, pi/2 up
-                    const int sector = static_cast<int>(std::floor((angle + kPi / 8.0f) / (kPi / 4.0f))) & 7;
-                    static constexpr unsigned kSectors[8] = {
-                        RSDKAIR_PAD_RIGHT, RSDKAIR_PAD_RIGHT | RSDKAIR_PAD_UP,   RSDKAIR_PAD_UP,
-                        RSDKAIR_PAD_UP | RSDKAIR_PAD_LEFT, RSDKAIR_PAD_LEFT, RSDKAIR_PAD_LEFT | RSDKAIR_PAD_DOWN,
-                        RSDKAIR_PAD_DOWN, RSDKAIR_PAD_DOWN | RSDKAIR_PAD_RIGHT};
-                    buttons |= kSectors[sector];
+                    // Horizontal first, as platformers want: a thumb that drifts down while
+                    // walking must not crouch or roll (jump would turn into a spin dash).
+                    // Left/right up to 65 degrees from the horizontal, up/down from 50:
+                    // only 50-65 is a diagonal.
+                    const float len = std::sqrt(dx * dx + dy * dy);
+                    const float h = std::abs(dx) / len, v = std::abs(dy) / len;  // cos, sin of the angle
+                    if (h > 0.4226f)  // cos 65
+                        buttons |= dx > 0 ? RSDKAIR_PAD_RIGHT : RSDKAIR_PAD_LEFT;
+                    if (v > 0.7660f)  // sin 50
+                        buttons |= dy > 0 ? RSDKAIR_PAD_DOWN : RSDKAIR_PAD_UP;
                 }
             }
         }
