@@ -1131,8 +1131,14 @@ struct GameMenu::Impl {
     float ui() const
     {
         const ImVec2 s = ImGui::GetIO().DisplaySize;
-        const float scale = s.y > s.x ? std::min(s.x / 720.0f, s.y / 1280.0f) : std::min(s.x / 1280.0f, s.y / 720.0f);
-        return std::clamp(scale, 0.5f, 2.5f);
+#if defined(__ANDROID__) || defined(RSDKAIR_MENU_PHONE_SCALE)
+        // A phone's screen is small: a smaller reference, so the menu fills more of it.
+        const float lw = 1000.0f, lh = 560.0f, pw = 600.0f, ph = 1150.0f;
+#else
+        const float lw = 1280.0f, lh = 720.0f, pw = 720.0f, ph = 1280.0f;
+#endif
+        const float scale = s.y > s.x ? std::min(s.x / pw, s.y / ph) : std::min(s.x / lw, s.y / lh);
+        return std::clamp(scale, 0.5f, 3.0f);
     }
 
     bool has_slots() const { return control && control->slots_kind == RSDKAIR_SLOTS_RSDKV4 && control->read_save_ram; }
