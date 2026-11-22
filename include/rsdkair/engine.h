@@ -16,7 +16,7 @@ extern "C" {
 
 /* Bumped on any incompatible change to the structs or functions below.
  * 2: RsdkAirEngineArgs::host, for the in-game menu (RsdkAirHost, RsdkAirEngineControl). */
-#define RSDKAIR_ABI_VERSION 2
+#define RSDKAIR_ABI_VERSION 3
 
 #if defined(_WIN32)
 #define RSDKAIR_EXPORT __declspec(dllexport)
@@ -54,6 +54,7 @@ typedef struct RsdkAirSetting {
     int min, max, step;         /* RANGE */
     const char *const *choices; /* CHOICE: NULL-terminated labels */
     int value;
+    int restart;                /* ABI 3: 1 when a change applies the next time the game starts */
 } RsdkAirSetting;
 
 /* Save slots the menu shows, by their engine's layout. */

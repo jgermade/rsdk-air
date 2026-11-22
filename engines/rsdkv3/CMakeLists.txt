@@ -52,6 +52,10 @@ rsdkair_patch_replace(engine [=[    while (SDL_PollEvent(&Engine.sdlEvents)) {]=
 rsdkair_patch_replace(engine [=[        SDL_GL_SwapWindow(Engine.window);]=]
 [=[        rsdkair_rsdkv3_menu_frame(); // rsdk-air: may open the in-game menu
         SDL_GL_SwapWindow(Engine.window);]=])
+# The frame cap stays on with VSync too (upstream drops it, so a 120/144 Hz monitor would
+# run the game 2-2.4 times too fast); VSync then only removes tearing.
+rsdkair_patch_replace(engine [=[        if (!vsync) {]=]
+[=[        { // rsdk-air: 60 FPS cap with or without VSync]=])
 rsdkair_patch_end(engine RSDKV3_RETROENGINE_CPP)
 
 # On-screen controls (drawn by the in-game menu): their buttons count as held, like a key
