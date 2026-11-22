@@ -37,6 +37,23 @@ rsdkair_patch_replace(userdata [=[
 #endif]=])
 rsdkair_patch_end(userdata RSDKV3_USERDATA_CPP)
 
+# The in-game menu (engines/common/menu_glue.hpp): every polled SDL event goes to the
+# menu first, and each frame calls it just before the swap.
+rsdkair_patch_begin(engine "${UP}/RSDKv3/RetroEngine.cpp")
+rsdkair_patch_replace(engine [=[#include "RetroEngine.hpp"]=]
+[=[#include "RetroEngine.hpp"
+
+int rsdkair_rsdkv3_menu_event(const void *event); // rsdk-air: rsdkv3_module.cpp
+void rsdkair_rsdkv3_menu_frame();]=])
+rsdkair_patch_replace(engine [=[    while (SDL_PollEvent(&Engine.sdlEvents)) {]=]
+[=[    while (SDL_PollEvent(&Engine.sdlEvents)) {
+        if (rsdkair_rsdkv3_menu_event(&Engine.sdlEvents)) // rsdk-air: the in-game menu took it
+            continue;]=])
+rsdkair_patch_replace(engine [=[        SDL_GL_SwapWindow(Engine.window);]=]
+[=[        rsdkair_rsdkv3_menu_frame(); // rsdk-air: may open the in-game menu
+        SDL_GL_SwapWindow(Engine.window);]=])
+rsdkair_patch_end(engine RSDKV3_RETROENGINE_CPP)
+
 set(RSDKV3_SOURCES
     ${UP}/dependencies/all/tinyxml2/tinyxml2.cpp
     ${UP}/dependencies/all/theoraplay/theoraplay.c
@@ -54,7 +71,7 @@ set(RSDKV3_SOURCES
     ${UP}/RSDKv3/Palette.cpp
     ${UP}/RSDKv3/Player.cpp
     ${UP}/RSDKv3/Reader.cpp
-    ${UP}/RSDKv3/RetroEngine.cpp
+    ${RSDKV3_RETROENGINE_CPP}
     ${UP}/RSDKv3/Scene.cpp
     ${UP}/RSDKv3/Scene3D.cpp
     ${UP}/RSDKv3/Script.cpp
@@ -73,6 +90,7 @@ rsdkair_engine_module(rsdkv3
 set_target_properties(rsdkv3 PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 
 target_include_directories(rsdkv3 PRIVATE
+    "${PROJECT_SOURCE_DIR}/engines/common"
     "${UP}/RSDKv3"
     "${UP}/dependencies/all/theoraplay"
     "${UP}/dependencies/all/tinyxml2")

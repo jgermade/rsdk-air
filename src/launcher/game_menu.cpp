@@ -97,6 +97,8 @@ public:
     virtual ~Renderer() = default;
     virtual void init() = 0;      // with the ImGui context current
     virtual void shutdown() = 0;  // idem
+    // The engine destroyed what we drew with (its renderer): forget it without freeing.
+    virtual void abandon() { shutdown(); }
     // A texture for art; nullptr-equivalent (0) on failure.
     virtual ImTextureID make_texture(const unsigned char *pixels, int w, int h, bool pixelated) = 0;
     // The frame the engine just drew (before it presents it), for the paused backdrop.
@@ -448,6 +450,21 @@ public:
         framebuffer = ImVec2(static_cast<float>(fw), static_cast<float>(fh));
     }
 
+    void abandon() override
+    {
+        // SDL freed the old renderer's textures with it. Leave Dear ImGui's backend data
+        // behind (a few bytes) rather than free textures twice.
+        textures_.clear();
+        for (ImTextureData *tex : ImGui::GetPlatformIO().Textures) {
+            tex->SetTexID(ImTextureID_Invalid);
+            tex->SetStatus(ImTextureStatus_Destroyed);
+        }
+        ImGuiIO &io = ImGui::GetIO();
+        io.BackendRendererUserData = nullptr;
+        io.BackendRendererName = nullptr;
+        io.BackendFlags &= ~(ImGuiBackendFlags_RendererHasVtxOffset | ImGuiBackendFlags_RendererHasTextures);
+    }
+
     void render(ImDrawData *dd) override { ImGui_ImplSDLRenderer2_RenderDrawData(dd, renderer_); }
     void present() override { SDL_RenderPresent(renderer_); }
 
@@ -523,6 +540,7 @@ struct GameMenu::Impl {
     std::string game_id, title;
     RsdkAirHost hooks{};
     const RsdkAirEngineControl *control = nullptr;
+    void *attached_window = nullptr, *attached_renderer = nullptr;
     std::unique_ptr<Renderer> renderer;
     ImGuiContext *imgui = nullptr;
     std::vector<std::vector<unsigned char>> font_data;
@@ -588,13 +606,17 @@ struct GameMenu::Impl {
 
     ~Impl() { teardown(); }
 
-    void teardown()
+    void teardown(bool abandon = false)
     {
         if (!imgui)
             return;
         ImGui::SetCurrentContext(imgui);
-        if (renderer)
-            renderer->shutdown();
+        if (renderer) {
+            if (abandon)
+                renderer->abandon();
+            else
+                renderer->shutdown();
+        }
         ImGui::DestroyContext(imgui);
         imgui = nullptr;
         renderer.reset();
@@ -610,10 +632,16 @@ struct GameMenu::Impl {
     {
         if (!c || !c->window)
             return;
-        if (control && control->window == c->window && renderer) {
+        // The same window and renderer as last time: keep the menu as it is. A new one (the
+        // engine re-created its window or renderer): start over with it.
+        if (renderer && attached_window == c->window && attached_renderer == c->renderer) {
             control = c;
         } else {
-            teardown();
+            // An SDL renderer that changed was destroyed by the engine with its textures.
+            const bool lost = renderer && attached_renderer && attached_renderer != c->renderer;
+            attached_window = c->window;
+            attached_renderer = c->renderer;
+            teardown(lost);
             control = c;
             if (c->gfx == RSDKAIR_GFX_SDL_RENDERER && c->renderer)
                 renderer = std::make_unique<SdlRenderer>(static_cast<SDL_Window *>(c->window),

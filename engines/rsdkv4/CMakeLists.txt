@@ -41,6 +41,23 @@ rsdkair_patch_replace(userdata [=[        env->DeleteLocalRef(activity);
     char buffer[0x100];]=])
 rsdkair_patch_end(userdata RSDKV4_USERDATA_CPP)
 
+# The in-game menu (engines/common/menu_glue.hpp): every polled SDL event goes to the
+# menu first, and each frame calls it just before the swap.
+rsdkair_patch_begin(engine "${UP}/RSDKv4/RetroEngine.cpp")
+rsdkair_patch_replace(engine [=[#include "RetroEngine.hpp"]=]
+[=[#include "RetroEngine.hpp"
+
+int rsdkair_rsdkv4_menu_event(const void *event); // rsdk-air: rsdkv4_module.cpp
+void rsdkair_rsdkv4_menu_frame();]=])
+rsdkair_patch_replace(engine [=[    while (SDL_PollEvent(&Engine.sdlEvents)) {]=]
+[=[    while (SDL_PollEvent(&Engine.sdlEvents)) {
+        if (rsdkair_rsdkv4_menu_event(&Engine.sdlEvents)) // rsdk-air: the in-game menu took it
+            continue;]=])
+rsdkair_patch_replace(engine [=[                SDL_GL_SwapWindow(Engine.window);]=]
+[=[                rsdkair_rsdkv4_menu_frame(); // rsdk-air: may open the in-game menu
+                SDL_GL_SwapWindow(Engine.window);]=])
+rsdkair_patch_end(engine RSDKV4_RETROENGINE_CPP)
+
 set(RSDKV4_SOURCES
     ${UP}/dependencies/all/tinyxml2/tinyxml2.cpp
     ${UP}/RSDKv4/Animation.cpp
@@ -58,7 +75,7 @@ set(RSDKV4_SOURCES
     ${UP}/RSDKv4/Palette.cpp
     ${UP}/RSDKv4/Reader.cpp
     ${UP}/RSDKv4/Renderer.cpp
-    ${UP}/RSDKv4/RetroEngine.cpp
+    ${RSDKV4_RETROENGINE_CPP}
     ${UP}/RSDKv4/Scene.cpp
     ${UP}/RSDKv4/Scene3D.cpp
     ${UP}/RSDKv4/Script.cpp
@@ -87,6 +104,7 @@ rsdkair_engine_module(rsdkv4
 set_target_properties(rsdkv4 PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 
 target_include_directories(rsdkv4 PRIVATE
+    "${PROJECT_SOURCE_DIR}/engines/common"
     "${UP}/RSDKv4"
     "${UP}/RSDKv4/NativeObjects"
     "${UP}/dependencies/all/stb-image"

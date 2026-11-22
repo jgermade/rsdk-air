@@ -64,6 +64,32 @@ if(ANDROID)
     configure_file("${RSDKV5_ENGINE_HPP}" "${RSDKV5_SHADOW_INCLUDE}/RSDK/Core/RetroEngine.hpp" COPYONLY)
 endif()
 
+# The in-game menu (engines/common/menu_glue.hpp): every polled SDL event goes to the menu
+# first, and each frame calls it just before SDL_RenderPresent. The SDL2 render device is
+# #included by Drawing.cpp, so Drawing.cpp is patched to include the patched copy.
+rsdkair_patch_begin(sdl2rd "${UP}/RSDKv5/RSDK/Graphics/SDL2/SDL2RenderDevice.cpp")
+rsdkair_patch_replace(sdl2rd [=[SDL_Window *RenderDevice::window     = nullptr;]=]
+[=[int rsdkair_rsdkv5_menu_event(const void *event); // rsdk-air: rsdkv5_module.cpp
+void rsdkair_rsdkv5_menu_frame();
+
+SDL_Window *RenderDevice::window     = nullptr;]=])
+rsdkair_patch_replace(sdl2rd [=[    while (SDL_PollEvent(&sdlEvent)) {
+        ProcessEvent(sdlEvent);]=]
+[=[    while (SDL_PollEvent(&sdlEvent)) {
+        if (rsdkair_rsdkv5_menu_event(&sdlEvent)) // rsdk-air: the in-game menu took it
+            continue;
+        ProcessEvent(sdlEvent);]=])
+rsdkair_patch_replace(sdl2rd [=[    // no change here
+    SDL_RenderPresent(renderer);]=]
+[=[    // no change here
+    rsdkair_rsdkv5_menu_frame(); // rsdk-air: may open the in-game menu
+    SDL_RenderPresent(renderer);]=])
+rsdkair_patch_end(sdl2rd RSDKV5_SDL2RENDERDEVICE_CPP)
+rsdkair_patch_begin(drawing "${UP}/RSDKv5/RSDK/Graphics/Drawing.cpp")
+rsdkair_patch_replace(drawing [=[#include "SDL2/SDL2RenderDevice.cpp"]=]
+"#include \"${RSDKV5_SDL2RENDERDEVICE_CPP}\" // rsdk-air: patched copy")
+rsdkair_patch_end(drawing RSDKV5_DRAWING_CPP)
+
 set(V5 "${UP}/RSDKv5")
 set(RSDKV5_SOURCES
     ${V5}/RSDK/Core/RetroEngine.cpp
@@ -74,7 +100,7 @@ set(RSDKV5_SOURCES
     ${V5}/RSDK/Dev/Debug.cpp
     ${V5}/RSDK/Storage/Storage.cpp
     ${V5}/RSDK/Storage/Text.cpp
-    ${V5}/RSDK/Graphics/Drawing.cpp
+    ${RSDKV5_DRAWING_CPP}
     ${V5}/RSDK/Graphics/Scene3D.cpp
     ${V5}/RSDK/Graphics/Animation.cpp
     ${V5}/RSDK/Graphics/Sprite.cpp
@@ -139,6 +165,8 @@ if(ANDROID)
     target_compile_definitions(rsdkv5 PRIVATE RSDKAIR_ANDROID_AS_LINUX=1)
 endif()
 target_include_directories(rsdkv5 PRIVATE
+    "${PROJECT_SOURCE_DIR}/engines/common"
+    "${V5}/RSDK/Graphics"  # the patched Drawing.cpp's relative includes (Legacy/, SDL2/…)
     "${V5}"
     "${UP}/dependencies/all"
     "${UP}/dependencies/all/tinyxml2"
