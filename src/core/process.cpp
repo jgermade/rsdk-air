@@ -62,8 +62,12 @@ int run_child(const std::filesystem::path &exe, const std::vector<std::string> &
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
     PROCESS_INFORMATION process{};
+    // rsdk-air is a GUI program: with no console of its own (started from Explorer), a
+    // console child would open a console window; CREATE_NO_WINDOW keeps it hidden. With a
+    // console (started from a terminal) the child shares it. GUI children ignore the flag.
+    const DWORD flags = GetConsoleWindow() ? 0 : CREATE_NO_WINDOW;
     // Without an application name, CreateProcessW finds the program like a shell would.
-    if (!CreateProcessW(search_path ? nullptr : exe.c_str(), wide.data(), nullptr, nullptr, FALSE, 0, nullptr,
+    if (!CreateProcessW(search_path ? nullptr : exe.c_str(), wide.data(), nullptr, nullptr, FALSE, flags, nullptr,
                         cwd.empty() ? nullptr : cwd.c_str(), &startup, &process)) {
         error = "cannot start " + path_to_utf8(exe) + " (error " + std::to_string(GetLastError()) + ")";
         return -1;

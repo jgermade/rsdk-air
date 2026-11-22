@@ -34,6 +34,9 @@
 
 #if defined(__ANDROID__)
 #include <jni.h>
+#elif defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -525,8 +528,27 @@ int run_picker(const fs::path &root)
 
 } // namespace
 
+#if defined(_WIN32)
+// rsdk-air is a GUI program on Windows (no console window of its own). Started from a
+// terminal, its output goes to that terminal; started from Explorer, there is none.
+// Output already redirected to a file or pipe (a valid descriptor) is left alone.
+static void attach_parent_console()
+{
+    if (!AttachConsole(ATTACH_PARENT_PROCESS))
+        return;
+    FILE *f = nullptr;
+    if (_fileno(stdout) < 0)
+        freopen_s(&f, "CONOUT$", "w", stdout);
+    if (_fileno(stderr) < 0)
+        freopen_s(&f, "CONOUT$", "w", stderr);
+}
+#endif
+
 int main(int argc, char **argv)
 {
+#if defined(_WIN32)
+    attach_parent_console();
+#endif
     const Options options = parse_args(argc, argv);
     if (!options.error.empty()) {
         std::fprintf(stderr, "%s\n\n%s", options.error.c_str(), usage().c_str());

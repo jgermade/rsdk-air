@@ -28,6 +28,15 @@ else()
     if(TARGET SDL2::SDL2main)
         target_link_libraries(rsdk-air PRIVATE SDL2::SDL2main)
     endif()
+    # Windows: a GUI program, so starting it opens no console window. main() attaches to
+    # the terminal it was started from, if any, for the command-line output.
+    if(WIN32)
+        set_target_properties(rsdk-air PROPERTIES WIN32_EXECUTABLE ON)
+        if(MSVC)
+            # Keep main() as the entry point (through SDL2main's main when it is linked).
+            target_link_options(rsdk-air PRIVATE /ENTRY:mainCRTStartup)
+        endif()
+    endif()
 endif()
 
 target_link_libraries(rsdk-air PRIVATE rsdkair_core rsdkair_ui_deps SDL2::SDL2)

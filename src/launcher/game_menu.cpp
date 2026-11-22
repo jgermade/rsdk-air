@@ -578,6 +578,21 @@ struct GameMenu::Impl {
     std::array<rsdkv4::Slot, rsdkv4::kSlotCount> slots{};
     std::array<int, 5> slot_char{};  // character for a new game per card (0 NO SAVE, 1-4)
     int stick_dir = 0;
+    // The mouse pointer, for hover styles. Only a real mouse: touch has no hover, and keys or
+    // pads hide it until the mouse moves again.
+    bool pointer_on = false;
+    ImVec2 pointer;
+    bool pointer_hand = false;  // over something clickable this frame
+    SDL_Cursor *hand_cursor = nullptr;
+
+    // Whether the pointer is over a box; marks the frame for the hand cursor.
+    bool hover(ImVec2 min, ImVec2 max)
+    {
+        if (!pointer_on || !hit(pointer, min, max))
+            return false;
+        pointer_hand = true;
+        return true;
+    }
 
     // What can be focused on the main screen, in reading order.
     enum class Kind { NoSave, Slot, Continue, Play, Screen, Settings, Exit };
@@ -663,6 +678,10 @@ struct GameMenu::Impl {
         for (SDL_GameController *pad : pads)
             SDL_GameControllerClose(pad);
         pads.clear();
+        if (hand_cursor) {
+            SDL_FreeCursor(hand_cursor);
+            hand_cursor = nullptr;
+        }
     }
 
     // ---- hooks ----
@@ -1212,6 +1231,7 @@ struct GameMenu::Impl {
         screen = Screen::Main;
         picking = false;
         anim = 0.0f;
+        pointer_on = false;
         frozen = ImTextureID_Invalid;
         reload_slots();
         build_items();
@@ -1241,13 +1261,16 @@ struct GameMenu::Impl {
             io.DisplayFramebufferScale = ImVec2(window.x > 0 ? fb.x / window.x : 1.0f, window.y > 0 ? fb.y / window.y : 1.0f);
             io.DeltaTime = std::max(dt, 1.0f / 1000.0f);
             ImGui::NewFrame();
+            pointer_hand = false;
             draw(ImGui::GetBackgroundDrawList(), dt);
+            set_hand_cursor(pointer_hand);
             ImGui::Render();
             renderer->render(ImGui::GetDrawData());
             renderer->present();
             if (dt < 1.0f / 60.0f)
                 SDL_Delay(static_cast<Uint32>((1.0f / 60.0f - dt) * 1000.0f));
         }
+        set_hand_cursor(false);
         renderer->end();
         if (!starting && control->set_paused)
             control->set_paused(0);
@@ -1271,6 +1294,15 @@ struct GameMenu::Impl {
 
     void close() { closing = true; }
 
+    void set_hand_cursor(bool on)
+    {
+        if (on && !hand_cursor)
+            hand_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND);
+        SDL_Cursor *want = on && hand_cursor ? hand_cursor : SDL_GetDefaultCursor();
+        if (want && SDL_GetCursor() != want)
+            SDL_SetCursor(want);
+    }
+
     void leave()
     {
         if (control->request_exit)
@@ -1284,7 +1316,22 @@ struct GameMenu::Impl {
     {
         switch (e.type) {
         case SDL_QUIT: leave(); break;
+        case SDL_MOUSEMOTION:
+            if (e.motion.which != SDL_TOUCH_MOUSEID) {
+                pointer_on = true;
+                pointer = ImVec2(static_cast<float>(e.motion.x), static_cast<float>(e.motion.y));
+            }
+            break;
+        case SDL_WINDOWEVENT:
+            if (e.window.event == SDL_WINDOWEVENT_LEAVE)
+                pointer_on = false;
+            break;
+        case SDL_FINGERDOWN:
+            if (e.tfinger.touchId != SDL_MOUSE_TOUCHID)  // a real finger, not the mouse as a touch
+                pointer_on = false;
+            break;
         case SDL_KEYDOWN:
+            pointer_on = false;
             switch (e.key.keysym.sym) {
             case SDLK_LEFT: act(Action::Left); break;
             case SDLK_RIGHT: act(Action::Right); break;
@@ -1301,6 +1348,7 @@ struct GameMenu::Impl {
             }
             break;
         case SDL_CONTROLLERBUTTONDOWN:
+            pointer_on = false;
             switch (e.cbutton.button) {
             case SDL_CONTROLLER_BUTTON_DPAD_LEFT: act(Action::Left); break;
             case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: act(Action::Right); break;
@@ -1840,8 +1888,14 @@ struct GameMenu::Impl {
                 it.max = ImVec2(x + p.w, y + pill_h);
                 it.button_min = it.button_max = it.pick_min = it.pick_max = it.trash_min = it.trash_max = ImVec2(0, 0);
                 const bool f = static_cast<int>(p.item) == focus && screen == Screen::Main;
+                const bool h = screen == Screen::Main && hover(it.min, it.max);
                 const bool danger = it.kind == Kind::Exit;
-                const ImU32 bg = f ? (danger ? rgba(0xf8, 0x71, 0x71) : IM_COL32_WHITE) : rgba(255, 255, 255, 16);
+                const ImU32 bg = f ? (danger ? rgba(0xf8, 0x71, 0x71) : IM_COL32_WHITE)
+                                   : h ? (danger ? rgba(0xf8, 0x71, 0x71, 70) : rgba(255, 255, 255, 46))
+                                       : rgba(255, 255, 255, 16);
+                if (h && !f)
+                    dl->AddRect(it.min, it.max, danger ? rgba(0xf8, 0x71, 0x71, 160) : rgba(255, 255, 255, 90), 14.0f * u,
+                                1.5f * u);
                 if (f) {
                     const float ring = 3.0f * u;
                     dl->AddRect(ImVec2(it.min.x - ring, it.min.y - ring), ImVec2(it.max.x + ring, it.max.y + ring),
@@ -1877,7 +1931,8 @@ struct GameMenu::Impl {
     void draw_card(ImDrawList *dl, Item &it, int index, float k, float u)
     {
         const bool focused = index == focus && screen == Screen::Main;
-        const float lift = focused ? 4.0f * k : 0.0f;
+        const bool card_hover = screen == Screen::Main && hover(it.min, it.max);
+        const float lift = focused ? 4.0f * k : card_hover ? 2.0f * k : 0.0f;
         const ImVec2 min(it.min.x, it.min.y - lift), max(it.max.x, it.max.y - lift);
         const float round = 8.0f * k, pad = 12.0f * k;
         it.button_min = it.button_max = it.pick_min = it.pick_max = it.trash_min = it.trash_max = ImVec2(0, 0);
@@ -1892,10 +1947,10 @@ struct GameMenu::Impl {
         dl->AddRectFilled(min, max, rgba(0, 0, 0), round);
         dl->AddRectFilled(ImVec2(min.x + 2.0f * k, min.y + 2.0f * k), ImVec2(max.x - 2.0f * k, max.y - 2.0f * k),
                           rgba(0x33, 0x33, 0x33), round - 2.0f * k);
-        if (focused) {
-            const float ring = 3.0f * u;
+        if (focused || card_hover) {
+            const float ring = (focused ? 3.0f : 2.0f) * u;
             dl->AddRect(ImVec2(min.x - ring / 2, min.y - ring / 2), ImVec2(max.x + ring / 2, max.y + ring / 2),
-                        IM_COL32_WHITE, round + ring / 2, ring);
+                        focused ? IM_COL32_WHITE : rgba(255, 255, 255, 110), round + ring / 2, ring);
         }
         const ImVec2 in_min(min.x + pad, min.y + pad), in_max(max.x - pad, max.y - pad);
         const float in_w = in_max.x - in_min.x;
@@ -1910,7 +1965,10 @@ struct GameMenu::Impl {
         const ImVec2 bmin(in_min.x, in_max.y - 34.0f * k), bmax(in_max.x, in_max.y);
         const rsdkv4::Slot *s = saved(it);
         auto button = [&](const char *label) {
-            dl->AddRectFilled(bmin, bmax, focused ? rgba(0, 0, 255) : rgba(65, 105, 225), 4.0f * k);
+            const bool h = screen == Screen::Main && hover(bmin, bmax);
+            dl->AddRectFilled(bmin, bmax, h ? rgba(0x3b, 0x5b, 0xff) : focused ? rgba(0, 0, 255) : rgba(65, 105, 225), 4.0f * k);
+            if (h)
+                dl->AddRect(bmin, bmax, rgba(255, 255, 255, 150), 4.0f * k, 1.5f * k);
             const ImVec2 ls = measure(font_bold, 16.0f * k, label);
             const ImVec2 at((bmin.x + bmax.x - ls.x) / 2, (bmin.y + bmax.y - ls.y) / 2);
             text(dl, font_bold, 16.0f * k, ImVec2(at.x, at.y + 1.0f * k), rgba(0, 0, 0, 160), label);
@@ -1966,6 +2024,8 @@ struct GameMenu::Impl {
             }
             it.pick_min = pmin;
             it.pick_max = pmax;
+            if (screen == Screen::Main)
+                hover(pmin, pmax);  // clickable: the hand cursor
             button("PLAY");
             return;
         }
@@ -1993,7 +2053,8 @@ struct GameMenu::Impl {
         {  // delete, for touch (Y / Delete too)
             const float bsz = 20.0f * k;
             const ImVec2 tmax(smax.x - 4.0f * k, smin.y + 4.0f * k + bsz), tmin(tmax.x - bsz, tmax.y - bsz);
-            dl->AddRectFilled(tmin, tmax, rgba(0, 0, 0, 184), 3.0f * k);
+            const bool th = screen == Screen::Main && hover(tmin, tmax);
+            dl->AddRectFilled(tmin, tmax, th ? rgba(0xdc, 0x26, 0x26, 230) : rgba(0, 0, 0, 184), 3.0f * k);
             const ImVec2 c((tmin.x + tmax.x) / 2, (tmin.y + tmax.y) / 2);
             const ImU32 ic = rgba(230, 230, 236);
             dl->AddRect(ImVec2(c.x - 3.5f * k, c.y - 2.0f * k), ImVec2(c.x + 3.5f * k, c.y + 5.5f * k), ic, 1.0f * k, 1.2f * k);
@@ -2096,9 +2157,16 @@ struct GameMenu::Impl {
         for (int i = 0; i < 2; ++i) {
             const ImVec2 bmin(min.x + pad + static_cast<float>(i) * (bw + 10.0f * u), y), bmax(bmin.x + bw, y + 48.0f * u);
             const bool f = dialog_focus == i;
+            const bool h = hover(bmin, bmax);
             const bool danger = i == 1;
-            dl->AddRectFilled(bmin, bmax, f ? (danger ? rgba(0xf8, 0x71, 0x71) : IM_COL32_WHITE) : rgba(255, 255, 255, 13),
+            dl->AddRectFilled(bmin, bmax,
+                              f   ? (danger ? rgba(0xf8, 0x71, 0x71) : IM_COL32_WHITE)
+                              : h ? (danger ? rgba(0xf8, 0x71, 0x71, 70) : rgba(255, 255, 255, 46))
+                                  : rgba(255, 255, 255, 13),
                               14.0f * u);
+            if (h && !f)
+                dl->AddRect(bmin, bmax, danger ? rgba(0xf8, 0x71, 0x71, 160) : rgba(255, 255, 255, 90), 14.0f * u,
+                            1.5f * u);
             const ImVec2 ls = measure(font_bold, 16.0f * u, labels[i]);
             text(dl, font_bold, 16.0f * u, ImVec2((bmin.x + bmax.x - ls.x) / 2, (bmin.y + bmax.y - ls.y) / 2),
                  f ? rgba(0x0b, 0x0d, 0x12) : IM_COL32_WHITE, labels[i]);
@@ -2127,7 +2195,11 @@ struct GameMenu::Impl {
             r.min = ImVec2(min.x + pad, y);
             r.max = ImVec2(max.x - pad, y + row_h);
             const bool f = focus == i;
-            dl->AddRectFilled(r.min, r.max, f ? IM_COL32_WHITE : rgba(255, 255, 255, 13), 14.0f * u);
+            const bool h = hover(r.min, r.max);
+            dl->AddRectFilled(r.min, r.max, f ? IM_COL32_WHITE : h ? rgba(255, 255, 255, 46) : rgba(255, 255, 255, 13),
+                              14.0f * u);
+            if (h && !f)
+                dl->AddRect(r.min, r.max, rgba(255, 255, 255, 90), 14.0f * u, 1.5f * u);
             const ImU32 fg = f ? rgba(0x0b, 0x0d, 0x12) : IM_COL32_WHITE;
             if (i == count) {
                 const ImVec2 ls = measure(font_bold, 16.0f * u, "Back");
@@ -2159,6 +2231,8 @@ struct GameMenu::Impl {
             r.less_min = ImVec2(r.less_max.x - arrow, r.more_min.y);
             text(dl, font_regular, 15.0f * u, ImVec2(vx, y + (row_h - vs.y) / 2), fg, value);
             auto tri = [&](ImVec2 bmin, ImVec2 bmax, bool left) {
+                if (hover(bmin, bmax))
+                    dl->AddRectFilled(bmin, bmax, f ? rgba(0x0b, 0x0d, 0x12, 40) : rgba(255, 255, 255, 40), 10.0f * u);
                 const ImVec2 c((bmin.x + bmax.x) / 2, (bmin.y + bmax.y) / 2);
                 const float a = 6.0f * u;
                 if (left)
