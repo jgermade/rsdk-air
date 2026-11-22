@@ -41,10 +41,6 @@ public:
     // (returns kQuit). The focus is kept between calls.
     int choose(const std::vector<GameStatus> &games);
 
-    // Engine arguments for the game choose() just returned (e.g. "--slot 1 --player 0"
-    // from the save-slot screen of Sonic 1/2); empty for the game's own menus.
-    std::vector<std::string> launch_args() const;
-
     // Shows a progress dialog over the picker until done() is true. status() gives the
     // line of text, progress() a fraction (negative: unknown). Polled every frame.
     void busy(const std::string &title, const std::function<std::string()> &status,

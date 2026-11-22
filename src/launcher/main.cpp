@@ -512,7 +512,7 @@ int run_picker(const fs::path &root)
             break;
         const GameSpec &game = *games[static_cast<std::size_t>(choice)].spec;
         picker.suspend();
-        const bool started = start_game_process(game, root, picker.launch_args(), error);
+        const bool started = start_game_process(game, root, {}, error);
         picker.resume();
         if (!started) {
             if (error.empty())

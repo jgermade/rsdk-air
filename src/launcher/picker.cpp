@@ -2,7 +2,6 @@
 
 #include <rsdkair/paths.hpp>
 #include <rsdkair/s3air.hpp>
-#include <rsdkair/saves_rsdkv4.hpp>
 #include <rsdkair/version.hpp>
 
 #include <SDL.h>
@@ -12,14 +11,11 @@
 #include <stb_image.h>
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
-#include <map>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -300,30 +296,6 @@ bool importable(const GameStatus &game)
 
 enum class Action { None, Left, Right, Up, Down, Accept, Back, More, Credits };
 
-// Games whose save slots the picker shows before starting (Sonic 1 and 2): the module
-// takes --slot / --player (engines/rsdkv4/rsdkv4_module.cpp).
-bool has_slots(const GameStatus &game) { return game.available && game.spec->module == "rsdkv4"; }
-
-// The slot screen's look: rsdkv4-wasm's app (src/app/app.css, from craft's GameLauncher),
-// redrawn with Dear ImGui. Art: art/players/<name>.png and art/stages/<game>/*.png.
-constexpr const char *kPlayerArt[] = {"sonic", "tails", "knuckles", "sonictails"};
-// Chaos Emerald colours, in order.
-constexpr ImU32 kGems[] = {IM_COL32(0x58, 0xe0, 0x58, 255), IM_COL32(0xf0, 0xa0, 0x38, 255),
-                           IM_COL32(0xf0, 0x78, 0xd8, 255), IM_COL32(0x98, 0x78, 0xf0, 255),
-                           IM_COL32(0xf0, 0xf0, 0xf0, 255), IM_COL32(0xf0, 0x78, 0x78, 255),
-                           IM_COL32(0x78, 0xc0, 0xf8, 255)};
-// The coloured band behind each character on a new-game card: left and right insets (in
-// fractions of the width) and colour, as .player-choose[data-player=…]::after.
-struct PlayerBand {
-    float left, right;
-    int r, g, b;
-};
-constexpr PlayerBand kBands[] = {
-    {0.30f, 0.20f, 13, 122, 233}, {0.40f, 0.10f, 241, 176, 0}, {0.20f, 0.30f, 255, 20, 0}, {0.20f, 0.70f, 160, 32, 240}};
-// @keyframes rsdk-player-bg: the bands drift between these insets on a focused card.
-constexpr float kBandFrames[][2] = {{0.3f, 0.2f}, {0.5f, 0.5f}, {0.1f, 0.2f}, {0.6f, 0.4f}, {0.7f, 0.1f}, {0.2f, 0.8f},
-                                    {0.0f, 0.6f}, {0.4f, 0.1f}, {0.1f, 0.7f}, {0.8f, 0.0f}, {0.3f, 0.2f}};
-
 } // namespace
 
 struct Picker::Impl {
@@ -350,25 +322,6 @@ struct Picker::Impl {
     bool pointer_used = false;     // hover moves the focus only after the mouse moved
     float inset_l = 0, inset_t = 0, inset_r = 0, inset_b = 0;  // unsafe screen edges (Android)
 
-    // Save-slot screen (Sonic 1/2). Cards: 0 "NO SAVE", 1-4 the save slots, 5 "GAME
-    // MENUS" (the game's own title screen). Opened by Play on a cover; Back returns.
-    static constexpr int kSlotCards = 6;
-    static constexpr int kMenusCard = 5;
-    bool slots_open = false;
-    int slots_game = -1;              // index into the games list
-    std::string slots_game_id;
-    std::filesystem::path slots_dir;  // the game's save folder
-    std::array<rsdkv4::Slot, rsdkv4::kSlotCount> slots{};
-    int slot_focus = 1;
-    std::array<int, kSlotCards> slot_char{};  // character for a new game, per card
-    float slots_anim = 0.0f;
-    float slots_time = 0.0f;   // drives the drifting bands on a focused new-game card
-    bool delete_open = false;  // "Delete game n?" dialog
-    int delete_focus = 0;      // 0 No, 1 Yes
-    float delete_anim = 0.0f;
-    std::string delete_error;
-    std::vector<std::string> chosen_args;  // engine arguments for the last choice
-
     // Credits screen (a Credits pill in the header, X / C / F1).
     bool credits_open = false;
     float credits_anim = 0.0f;
@@ -377,81 +330,6 @@ struct Picker::Impl {
     bool credits_dragged = false;  // the finger moved: releasing it is not a tap
     ImVec2 credits_pill_min, credits_pill_max;
     ImVec2 credits_close_min, credits_close_max;
-
-    struct SlotHits {
-        ImVec2 card_min[kSlotCards], card_max[kSlotCards];
-        ImVec2 button_min[kSlotCards], button_max[kSlotCards];
-        ImVec2 pick_min[kSlotCards], pick_max[kSlotCards];   // character square (new game)
-        ImVec2 trash_min[kSlotCards], trash_max[kSlotCards];
-    };
-    SlotHits slot_hits{};
-
-    // Images under art/, loaded on first use (nullptr cached for missing files).
-    std::map<std::string, SDL_Texture *> art_cache;
-
-    SDL_Texture *art(const std::string &relative, bool pixelated)
-    {
-        auto it = art_cache.find(relative);
-        if (it != art_cache.end())
-            return it->second;
-        SDL_Texture *tex = load_texture(resources + "art/" + relative, nullptr);
-        if (tex && pixelated)
-            SDL_SetTextureScaleMode(tex, SDL_ScaleModeNearest);
-        art_cache[relative] = tex;
-        return tex;
-    }
-
-    void open_slots(int index, const GameStatus &game)
-    {
-        slots_open = true;
-        slots_game = index;
-        slots_game_id = std::string(game.spec->id);
-        slots_dir = game.save_dir;
-        delete_open = false;
-        slots_anim = 0.0f;
-        reload_slots();
-        // The first slot with a game in it is where most people want to be (as in
-        // rsdkv4-wasm), else the first empty one.
-        slot_focus = 1;
-        for (int i = 0; i < rsdkv4::kSlotCount; ++i) {
-            if (!slots[static_cast<std::size_t>(i)].empty) {
-                slot_focus = i + 1;
-                break;
-            }
-        }
-    }
-
-    void reload_slots()
-    {
-        for (int i = 0; i < rsdkv4::kSlotCount; ++i) {
-            slots[static_cast<std::size_t>(i)] = rsdkv4::Slot{};
-            slots[static_cast<std::size_t>(i)].slot = i;
-        }
-        if (auto read = rsdkv4::read_slots(slots_dir))
-            slots = *read;
-    }
-
-    const rsdkv4::Slot *saved_slot(int card) const
-    {
-        if (card < 1 || card > rsdkv4::kSlotCount)
-            return nullptr;
-        const rsdkv4::Slot &slot = slots[static_cast<std::size_t>(card - 1)];
-        return slot.empty ? nullptr : &slot;
-    }
-
-    // A slot without a game: the character picker over PLAY.
-    bool new_game_card(int card) const { return card >= 1 && card <= 4 && !saved_slot(card); }
-
-    // The engine arguments for starting from a card (engines/rsdkv4/rsdkv4_module.cpp).
-    std::vector<std::string> card_args(int card) const
-    {
-        if (card == kMenusCard)
-            return {};  // the game's own title screen and menus
-        const std::string slot = std::to_string(card - 1);  // card 0 -> -1, no save
-        if (saved_slot(card))
-            return {"--slot", slot};
-        return {"--slot", slot, "--player", std::to_string(slot_char[static_cast<std::size_t>(card)])};
-    }
 
     // Asks Android which edges of the screen are covered by system bars or a display
     // cutout (camera notch). Elsewhere the whole window is usable.
@@ -505,10 +383,6 @@ struct Picker::Impl {
                 SDL_DestroyTexture(c.art);
             if (c.glow)
                 SDL_DestroyTexture(c.glow);
-        }
-        for (auto &[path, tex] : art_cache) {
-            if (tex)
-                SDL_DestroyTexture(tex);
         }
         for (SDL_GameController *pad : pads)
             SDL_GameControllerClose(pad);
@@ -667,97 +541,6 @@ struct Picker::Impl {
         const float grid_bottom = l.max.empty() ? top : l.max.back().y + cap;  // caption under the last row
         l.panel_min = ImVec2(origin.x + margin, grid_bottom + 22.0f * u);
         l.panel_max = ImVec2(origin.x + size.x - margin, origin.y + size.y - 62.0f * u);
-        return l;
-    }
-
-    // Slot cards, as rsdkv4-wasm: 170 x 220 at scale 1 (NO SAVE and GAME MENUS 170 x 130),
-    // top-aligned in a row: six in one row in landscape, three per row in portrait or
-    // when narrow. The heading sits above the row, left-aligned with it; hints below.
-    struct SlotLayout {
-        float u = 1.0f;
-        float k = 1.0f;  // card scale: card width / 170
-        ImVec2 min[kSlotCards], max[kSlotCards];
-        ImVec2 heading;  // top-left of the kicker + "Load game"
-        int order[kSlotCards] = {0, 1, 2, 3, 4, 5};  // cards in reading order (Left/Right)
-        float hints_y = 0.0f;
-        float centre_x = 0.0f;
-    };
-
-    SlotLayout slot_layout() const
-    {
-        SlotLayout l;
-        const ImVec2 origin = safe_min();
-        const ImVec2 size = safe_size();
-        const float u = l.u = ui();
-        const float margin = kMargin * u;
-        const float width = size.x - 2 * margin;
-        const float gap = 22.0f * u;
-        const bool portrait = size.y > size.x;
-        const float heading_h = 62.0f * u;
-        auto width_for = [&](int c, float cap) {
-            return std::min(cap, (width - static_cast<float>(c - 1) * gap) / static_cast<float>(c));
-        };
-        // Portrait: NO SAVE and GAME MENUS share the first row, the slots follow.
-        if (portrait) {
-            const int order[kSlotCards] = {0, kMenusCard, 1, 2, 3, 4};
-            std::copy(std::begin(order), std::end(order), l.order);
-        }
-        auto card_h = [&](int card, float w) {
-            return w * (card == 0 || card == kMenusCard ? 130.0f : 220.0f) / 170.0f;
-        };
-        // Each row is as tall as its tallest card.
-        auto grid_height = [&](int c, float w) {
-            float h = 0.0f;
-            for (int start = 0; start < kSlotCards; start += c) {
-                float row = 0.0f;
-                for (int i = start; i < std::min(kSlotCards, start + c); ++i)
-                    row = std::max(row, card_h(l.order[i], w));
-                h += row + (start > 0 ? gap : 0.0f);
-            }
-            return h;
-        };
-        auto height_for = [&](int c, float w) {  // heading + cards + hints
-            return heading_h + 30.0f * u + grid_height(c, w) + 82.0f * u;
-        };
-        const float room_h = size.y - 86.0f * u;
-        int cols = kSlotCards;
-        float w = width_for(cols, 190.0f * u);
-        if (portrait) {
-            // Two big cards per row for a finger, if three rows fit; else three per row.
-            cols = 2;
-            w = width_for(2, 260.0f * u);
-            if (height_for(2, w) > room_h) {
-                cols = 3;
-                w = width_for(3, 220.0f * u);
-            }
-        } else if (w < 140.0f * u) {
-            cols = 3;
-            w = width_for(3, 220.0f * u);
-        }
-        l.k = w / 170.0f;
-        const float grid_w = static_cast<float>(cols) * w + static_cast<float>(cols - 1) * gap;
-        const float grid_h = grid_height(cols, w);
-        const float block = heading_h + 30.0f * u + grid_h + 34.0f * u + 22.0f * u + 26.0f * u;  // + credit line
-        const float top = origin.y + 70.0f * u;  // below the app's header
-        const float room = origin.y + size.y - top - 16.0f * u;
-        const float y0 = top + std::max(0.0f, (room - block) / 2);
-        const float x0 = origin.x + margin + (width - grid_w) / 2;
-        l.heading = ImVec2(x0, y0);
-        const float cards_y = y0 + heading_h + 30.0f * u;
-        float y = cards_y;
-        for (int start = 0; start < kSlotCards; start += cols) {
-            float row = 0.0f;
-            for (int i = start; i < std::min(kSlotCards, start + cols); ++i) {
-                const int card = l.order[i];
-                const float x = x0 + static_cast<float>(i - start) * (w + gap);
-                l.min[card] = ImVec2(x, y);
-                l.max[card] = ImVec2(x + w, y + card_h(card, w));
-                row = std::max(row, card_h(card, w));
-            }
-            y += row + gap;
-        }
-        l.hints_y = cards_y + grid_h + 34.0f * u + 11.0f * u;
-        l.centre_x = origin.x + size.x / 2;
         return l;
     }
 
@@ -1026,8 +809,6 @@ struct Picker::Impl {
         if (game.available) {
             chip = "Ready";
             chip_col = rgba(80, 220, 140);
-            if (has_slots(game))
-                return "Your game data was found. Press Play to choose a save.";
             return "Your game data was found. Press Play to start.";
         }
         if (installable(game)) {
@@ -1150,306 +931,6 @@ struct Picker::Impl {
         }
         text(dl, font_bold, 19.0f * u, ImVec2(lx, (bmin.y + bmax.y - ls.y) / 2),
              active ? rgba(14, 13, 20) : rgba(160, 160, 172), label);
-    }
-
-    // Save-slot screen -----------------------------------------------------------------
-
-    // Draws `tex` into [min, max] keeping its aspect: fitted inside (contain) or filling
-    // it with the overflow cropped (cover).
-    void draw_image(ImDrawList *dl, SDL_Texture *tex, ImVec2 min, ImVec2 max, bool cover, ImU32 tint,
-                    float rounding = 0.0f)
-    {
-        int tw = 1, th = 1;
-        SDL_QueryTexture(tex, nullptr, nullptr, &tw, &th);
-        const float box_w = max.x - min.x, box_h = max.y - min.y;
-        const float ta = static_cast<float>(tw) / static_cast<float>(std::max(1, th));
-        const float ba = box_w / std::max(1.0f, box_h);
-        ImVec2 uv0(0, 0), uv1(1, 1);
-        ImVec2 a = min, b = max;
-        if (cover) {
-            if (ta > ba) {
-                const float k = ba / ta;
-                uv0.x = (1 - k) / 2, uv1.x = (1 + k) / 2;
-            } else {
-                const float k = ta / ba;
-                uv0.y = (1 - k) / 2, uv1.y = (1 + k) / 2;
-            }
-        } else if (ta > ba) {
-            const float h = box_w / ta;
-            a.y = min.y + (box_h - h) / 2, b.y = a.y + h;
-        } else {
-            const float w = box_h * ta;
-            a.x = min.x + (box_w - w) / 2, b.x = a.x + w;
-        }
-        if (rounding > 0)
-            dl->AddImageRounded(texture_ref(tex), a, b, uv0, uv1, tint, rounding);
-        else
-            dl->AddImage(texture_ref(tex), a, b, uv0, uv1, tint);
-    }
-
-    // The blue PLAY / CONTINUE button at the bottom of a card.
-    void draw_slot_button(ImDrawList *dl, int card, ImVec2 min, ImVec2 max, const char *label, float k, bool focused)
-    {
-        dl->AddRectFilled(min, max, focused ? rgba(0, 0, 255) : rgba(65, 105, 225), 4.0f * k);
-        const ImVec2 ls = measure(font_bold, 16.0f * k, label);
-        const ImVec2 at((min.x + max.x - ls.x) / 2, (min.y + max.y - ls.y) / 2);
-        text(dl, font_bold, 16.0f * k, ImVec2(at.x, at.y + 1.0f * k), rgba(0, 0, 0, 160), label);
-        text(dl, font_bold, 16.0f * k, at, IM_COL32_WHITE, label);
-        slot_hits.button_min[card] = min;
-        slot_hits.button_max[card] = max;
-    }
-
-    void draw_slot_card(ImDrawList *dl, const SlotLayout &l, int card)
-    {
-        const float u = l.u, k = l.k;
-        const bool focused = card == slot_focus;
-        const float lift = focused ? 4.0f * k : 0.0f;  // translateY(-4px)
-        const ImVec2 min(l.min[card].x, l.min[card].y - lift), max(l.max[card].x, l.max[card].y - lift);
-        const float round = 8.0f * k;
-        const float pad = 12.0f * k;
-
-        slot_hits.card_min[card] = min;
-        slot_hits.card_max[card] = max;
-        slot_hits.button_min[card] = slot_hits.button_max[card] = ImVec2(0, 0);
-        slot_hits.pick_min[card] = slot_hits.pick_max[card] = ImVec2(0, 0);
-        slot_hits.trash_min[card] = slot_hits.trash_max[card] = ImVec2(0, 0);
-
-        if (focused) {
-            for (int i = 1; i <= 5; ++i) {  // 0 24px 50px -20px #000
-                const float sp = static_cast<float>(i) * 4.0f * k;
-                dl->AddRectFilled(ImVec2(min.x - sp + 6.0f * k, min.y - sp + 24.0f * k),
-                                  ImVec2(max.x + sp - 6.0f * k, max.y + sp + 4.0f * k), rgba(0, 0, 0, 22), round + sp);
-            }
-        }
-        // 2px black border, #333 card.
-        dl->AddRectFilled(min, max, rgba(0, 0, 0), round);
-        dl->AddRectFilled(ImVec2(min.x + 2.0f * k, min.y + 2.0f * k), ImVec2(max.x - 2.0f * k, max.y - 2.0f * k),
-                          rgba(0x33, 0x33, 0x33), round - 2.0f * k);
-        if (focused) {
-            const float ring = 3.0f * u;
-            dl->AddRect(ImVec2(min.x - ring / 2, min.y - ring / 2), ImVec2(max.x + ring / 2, max.y + ring / 2),
-                        IM_COL32_WHITE, round + ring / 2, ring);
-        }
-
-        const ImVec2 in_min(min.x + pad, min.y + pad), in_max(max.x - pad, max.y - pad);
-        const float in_w = in_max.x - in_min.x;
-
-        // NO SAVE and GAME MENUS: a short card with its name.
-        if (card == 0 || card == kMenusCard) {
-            const char *name = card == 0 ? "NO SAVE" : "GAME MENUS";
-            const ImVec2 ns = measure(font_bold, 16.0f * k, name);
-            text(dl, font_bold, 16.0f * k, ImVec2((min.x + max.x - ns.x) / 2, (min.y + max.y - ns.y) / 2),
-                 IM_COL32_WHITE, name);
-            return;
-        }
-
-        const ImVec2 bmin(in_min.x, in_max.y - 34.0f * k), bmax(in_max.x, in_max.y);
-        const rsdkv4::Slot *saved = saved_slot(card);
-
-        if (!saved) {
-            // Character picker: a white square, two colour bands, the character on top.
-            const int ch = std::clamp(slot_char[static_cast<std::size_t>(card)], 0, 3);
-            const ImVec2 pmin = in_min, pmax(in_max.x, in_min.y + in_w);
-            dl->AddRectFilled(pmin, pmax, IM_COL32_WHITE);
-            auto band = [&](float left, float right, ImU32 col) {
-                dl->AddRectFilled(ImVec2(pmin.x + in_w * left, pmin.y), ImVec2(pmax.x - in_w * right, pmax.y), col);
-            };
-            auto drift = [&](float period, bool reverse, float &left, float &right) {
-                float t = std::fmod(slots_time / period, 1.0f);
-                if (reverse)
-                    t = 1.0f - t;
-                const float f = t * 10.0f;
-                const int i = std::min(9, static_cast<int>(f));
-                const float m = f - static_cast<float>(i);
-                left = kBandFrames[i][0] + (kBandFrames[i + 1][0] - kBandFrames[i][0]) * m;
-                right = kBandFrames[i][1] + (kBandFrames[i + 1][1] - kBandFrames[i][1]) * m;
-            };
-            float gl = 3.0f * 16.0f * k / in_w, gr = 16.0f * k / in_w;  // inset: 0 1rem 0 3rem
-            const PlayerBand &pb = kBands[ch];
-            float cl = pb.left, cr = pb.right;
-            if (focused) {
-                drift(20.0f, false, gl, gr);
-                drift(30.0f, true, cl, cr);
-            }
-            band(gl, gr, rgba(180, 180, 180, 51));
-            band(cl, cr, rgba(pb.r, pb.g, pb.b, 51));
-            const float top_pad = focused ? 0.0f : 16.0f * k;  // padding 1rem .5rem 0, none when focused
-            const float side_pad = focused ? 0.0f : 8.0f * k;
-            if (SDL_Texture *tex = art(std::string("players/") + kPlayerArt[ch] + ".png", false)) {
-                draw_image(dl, tex, ImVec2(pmin.x + side_pad, pmin.y + top_pad), ImVec2(pmax.x - side_pad, pmax.y),
-                           false, IM_COL32_WHITE);
-            } else {
-                const std::string name(rsdkv4::character_name(ch));
-                const ImVec2 ns = measure(font_bold, 15.0f * k, name);
-                text(dl, font_bold, 15.0f * k, ImVec2((pmin.x + pmax.x - ns.x) / 2, (pmin.y + pmax.y - ns.y) / 2),
-                     rgba(40, 40, 50), name);
-            }
-            slot_hits.pick_min[card] = pmin;
-            slot_hits.pick_max[card] = pmax;
-            draw_slot_button(dl, card, bmin, bmax, "PLAY", k, focused);
-            return;
-        }
-
-        // A saved slot: zone portrait with its tag and the character, zone name,
-        // emeralds, lives and score, CONTINUE.
-        const std::optional<rsdkv4::SlotZone> zone = rsdkv4::describe_slot(slots_game_id, *saved);
-        const ImVec2 smin = in_min, smax(in_max.x, in_min.y + in_w * 9.0f / 16.0f);
-        const float sr = 4.0f * k;
-        dl->AddRectFilledMultiColor(smin, smax, rgba(0x1b, 0x2a, 0x4a), rgba(0x14, 0x1f, 0x38), rgba(0x08, 0x0d, 0x1c),
-                                    rgba(0x0c, 0x14, 0x28));
-        if (zone && !zone->art.empty()) {
-            if (SDL_Texture *tex = art(zone->art, true))
-                draw_image(dl, tex, smin, smax, true, rgba(230, 230, 230), sr);
-        }
-        dl->AddRect(smin, smax, rgba(255, 255, 255, 51), sr, 1.0f * k);
-        if (zone && !zone->tag.empty()) {
-            const std::string tag = zone->act > 0 ? zone->tag + " - ACT " + std::to_string(zone->act) : zone->tag;
-            const ImVec2 ts = measure(font_bold, 8.5f * k, tag);
-            const ImVec2 tmin(smin.x + 4.0f * k, smin.y + 4.0f * k);
-            dl->AddRectFilled(tmin, ImVec2(tmin.x + ts.x + 8.0f * k, tmin.y + ts.y + 2.0f * k), rgba(0, 0, 0, 184),
-                              3.0f * k);
-            text(dl, font_bold, 8.5f * k, ImVec2(tmin.x + 4.0f * k, tmin.y + 1.0f * k), rgba(0xfb, 0xbf, 0x24), tag);
-        }
-        // Delete, for touch (also Y / Delete): a small bin in the portrait's corner.
-        {
-            const float b = 20.0f * k;
-            const ImVec2 tmax(smax.x - 4.0f * k, smin.y + 4.0f * k + b), tmin(tmax.x - b, tmax.y - b);
-            dl->AddRectFilled(tmin, tmax, rgba(0, 0, 0, 184), 3.0f * k);
-            const ImVec2 c((tmin.x + tmax.x) / 2, (tmin.y + tmax.y) / 2);
-            const ImU32 ic = rgba(230, 230, 236);
-            dl->AddRect(ImVec2(c.x - 3.5f * k, c.y - 2.0f * k), ImVec2(c.x + 3.5f * k, c.y + 5.5f * k), ic, 1.0f * k,
-                        1.2f * k);
-            dl->AddLine(ImVec2(c.x - 5.5f * k, c.y - 4.0f * k), ImVec2(c.x + 5.5f * k, c.y - 4.0f * k), ic, 1.2f * k);
-            dl->AddLine(ImVec2(c.x - 2.0f * k, c.y - 6.0f * k), ImVec2(c.x + 2.0f * k, c.y - 6.0f * k), ic, 1.2f * k);
-            // A bigger target than the icon: at least 40 px for a finger.
-            const float grow = std::max(0.0f, (40.0f * u - b) / 2);
-            slot_hits.trash_min[card] = ImVec2(tmin.x - grow, tmin.y - grow);
-            slot_hits.trash_max[card] = ImVec2(tmax.x + grow, tmax.y + grow);
-        }
-        // The character, overlapping the portrait's bottom-right corner by 1rem.
-        const float icon_h = 64.0f * k;
-        const char *player = kPlayerArt[std::clamp(saved->character, 0, 3)];
-        if (SDL_Texture *tex = art(std::string("players/") + player + ".png", false)) {
-            const ImVec2 imax(smax.x, smax.y + 16.0f * k), imin(imax.x - icon_h, imax.y - icon_h);
-            draw_image(dl, tex, ImVec2(imin.x + 2.0f * k, imin.y + 2.0f * k), ImVec2(imax.x + 2.0f * k, imax.y + 2.0f * k),
-                       false, rgba(0, 0, 0, 150));  // drop shadow
-            draw_image(dl, tex, imin, imax, false, IM_COL32_WHITE);
-        }
-        float y = smax.y + 4.0f * k;
-        const std::string name = zone ? zone->name : std::string();
-        const float title_w = in_w * 0.74f;  // padding-right: 26%, clear of the character
-        text(dl, font_bold, 11.5f * k, ImVec2(in_min.x, y + 1.0f * k), rgba(0, 0, 0, 200), name, title_w);
-        text(dl, font_bold, 11.5f * k, ImVec2(in_min.x, y), rgba(0xfb, 0xbf, 0x24), name, title_w);
-        y += 11.5f * k * 2.3f;
-
-        // Emeralds, centred: diamonds, dim when missing.
-        const int total = rsdkv4::emerald_total(slots_game_id);
-        const int have = rsdkv4::emerald_count(slots_game_id, *saved);
-        const float gem = 11.0f * k, ggap = 3.0f * k;
-        float gx = (in_min.x + in_max.x - (static_cast<float>(total) * gem + static_cast<float>(total - 1) * ggap)) / 2;
-        const float gy = bmin.y - 8.0f * k - 20.0f * k - 6.0f * k - gem;
-        for (int i = 0; i < total; ++i, gx += gem + ggap) {
-            const ImU32 c = with_alpha(kGems[i], i < have ? 1.0f : 0.2f);
-            const ImVec2 top(gx + gem / 2, gy), right(gx + gem, gy + gem * 0.38f), bottom(gx + gem / 2, gy + gem),
-                left(gx, gy + gem * 0.38f);
-            dl->AddQuadFilled(top, right, bottom, left, c);
-        }
-
-        // Lives and score chips.
-        const std::string lives = std::to_string(saved->lives), score = std::to_string(saved->score);
-        const float fs = 11.0f * k, chip_h = 18.0f * k, icon = 10.0f * k;
-        const float lw = icon + 4.0f * k + measure(font_regular, fs, lives).x + 10.0f * k;
-        const float sw = icon + 4.0f * k + measure(font_regular, fs, score).x + 10.0f * k;
-        float cx = (in_min.x + in_max.x - (lw + 6.0f * k + sw)) / 2;
-        const float cy = bmin.y - 8.0f * k - chip_h;
-        auto chip = [&](float w, const std::string &value, bool heart) {
-            const ImVec2 cmin(cx, cy), cmax(cx + w, cy + chip_h);
-            dl->AddRectFilled(cmin, cmax, rgba(0, 0, 0, 102), 3.0f * k);
-            dl->AddRect(cmin, cmax, rgba(255, 255, 255, 26), 3.0f * k, 1.0f);
-            const ImVec2 ic(cmin.x + 5.0f * k + icon / 2, (cmin.y + cmax.y) / 2);
-            if (heart) {
-                const float r = icon * 0.27f;
-                dl->AddCircleFilled(ImVec2(ic.x - r * 0.9f, ic.y - r * 0.6f), r, rgba(0xf4, 0x3f, 0x5e));
-                dl->AddCircleFilled(ImVec2(ic.x + r * 0.9f, ic.y - r * 0.6f), r, rgba(0xf4, 0x3f, 0x5e));
-                dl->AddTriangleFilled(ImVec2(ic.x - icon * 0.5f, ic.y - r * 0.3f), ImVec2(ic.x + icon * 0.5f, ic.y - r * 0.3f),
-                                      ImVec2(ic.x, ic.y + icon * 0.48f), rgba(0xf4, 0x3f, 0x5e));
-            } else {
-                ImVec2 pts[10];
-                for (int i = 0; i < 10; ++i) {
-                    const float r = (i % 2 == 0 ? 0.5f : 0.22f) * icon;
-                    const float a = -kPi / 2 + static_cast<float>(i) * kPi / 5;
-                    pts[i] = ImVec2(ic.x + std::cos(a) * r, ic.y + std::sin(a) * r);
-                }
-                dl->AddConcavePolyFilled(pts, 10, rgba(0xfb, 0xbf, 0x24));
-            }
-            const ImVec2 vs = measure(font_regular, fs, value);
-            text(dl, font_regular, fs, ImVec2(cmin.x + 5.0f * k + icon + 4.0f * k, (cmin.y + cmax.y - vs.y) / 2),
-                 rgba(0xe2, 0xe8, 0xf0), value);
-            cx += w + 6.0f * k;
-        };
-        chip(lw, lives, true);
-        chip(sw, score, false);
-
-        draw_slot_button(dl, card, bmin, bmax, "CONTINUE", k, focused);
-    }
-
-    void draw_slots(ImDrawList *dl, const GameStatus &game, float dt)
-    {
-        slots_anim = approach(slots_anim, 1.0f, dt, 12.0f);
-        slots_time += dt;
-        const SlotLayout l = slot_layout();
-        const float u = l.u;
-        // Darker backdrop with a blue glow from the top (.rsdk-overlay on the slot screen).
-        const ImVec2 size = ImGui::GetIO().DisplaySize;
-        dl->AddRectFilled(ImVec2(0, 0), size, rgba(4, 6, 12, static_cast<int>(200 * slots_anim)));
-        dl->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(size.x, size.y * 0.6f), rgba(29, 78, 216, static_cast<int>(70 * slots_anim)),
-                                    rgba(29, 78, 216, static_cast<int>(70 * slots_anim)), rgba(29, 78, 216, 0),
-                                    rgba(29, 78, 216, 0));
-
-        // Heading: the game's name as a kicker, then "Load game".
-        std::string kicker(game.spec->title);
-        for (char &c : kicker)
-            c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-        text(dl, font_bold, 12.0f * u, l.heading, rgba(0x8e, 0x97, 0xa9), kicker);
-        text(dl, font_bold, 32.0f * u, ImVec2(l.heading.x, l.heading.y + 20.0f * u), IM_COL32_WHITE, "Load game");
-        // Who made the engine, under the cards (the decompilation licenses ask for credit).
-        const std::string credit = engine_credit(game.spec->module);
-        const float cw = measure(font_regular, 12.5f * u, credit).x;
-        text(dl, font_regular, 12.5f * u, ImVec2(l.centre_x - cw / 2, l.hints_y + 26.0f * u), rgba(120, 124, 140),
-             credit);
-
-        for (int i = 0; i < kSlotCards; ++i) {
-            if (i != slot_focus)
-                draw_slot_card(dl, l, i);
-        }
-        draw_slot_card(dl, l, slot_focus);  // on top: its ring and shadow
-        if (!delete_error.empty()) {
-            const ImVec2 es = measure(font_regular, 14.0f * u, delete_error);
-            text(dl, font_regular, 14.0f * u, ImVec2(l.centre_x - es.x / 2, l.hints_y + 48.0f * u), rgba(240, 120, 120),
-                 delete_error);
-        }
-    }
-
-    void draw_slot_hints(ImDrawList *dl, float u)
-    {
-        const SlotLayout l = slot_layout();
-        const bool saved = saved_slot(slot_focus) != nullptr;
-        const bool fresh = new_game_card(slot_focus);
-        const char *accept = slot_focus == kMenusCard ? "Open" : saved ? "Continue" : "Play";
-        // Measure, then draw centred under the cards (draw_hint goes right to left).
-        auto hints = [&](ImDrawList *target, float &x) {
-            if (fresh)
-                draw_hint(target, x, l.hints_y, u, nullptr, 0, "Up/Down", "Character");
-            if (saved)
-                draw_hint(target, x, l.hints_y, u, "Y", rgba(240, 200, 80), "Del", "Delete");
-            draw_hint(target, x, l.hints_y, u, "B", rgba(240, 110, 110), "Esc", "Back");
-            draw_hint(target, x, l.hints_y, u, "A", rgba(80, 220, 140), "Enter", accept);
-        };
-        float x = 0.0f;
-        hints(nullptr, x);
-        const float width = -x - 26.0f * u;
-        x = l.centre_x + width / 2;
-        hints(dl, x);
     }
 
     void draw_hint(ImDrawList *dl, float &x, float y, float u, const char *glyph, ImU32 glyph_col, const char *key,
@@ -1603,7 +1084,6 @@ struct Picker::Impl {
 
 Picker::Picker() : impl_(std::make_unique<Impl>()) {}
 
-std::vector<std::string> Picker::launch_args() const { return impl_->chosen_args; }
 Picker::~Picker() = default;
 
 bool Picker::open(std::string &error)
@@ -1703,75 +1183,11 @@ int Picker::choose(const std::vector<GameStatus> &games)
         s.set_focus(s.focus, count);
     }
 
-    // Back from a game: the slot screen shows again, with the slots as the game left them.
-    if (s.slots_open) {
-        const bool valid = s.slots_game >= 0 && s.slots_game < count &&
-                           has_slots(games[static_cast<std::size_t>(s.slots_game)]);
-        if (valid) {
-            s.reload_slots();
-            s.delete_open = false;
-        } else {
-            s.slots_open = false;
-        }
-    }
-    s.chosen_args.clear();
-
     ImVec2 play_min, play_max;
     ImVec2 confirm_rects[4];
-    ImVec2 delete_rects[4];
     Uint64 last = SDL_GetPerformanceCounter();
     for (;;) {
         int chosen = -2;  // -2 keep going, -1 quit, >= 0 play
-        auto play_card = [&](int card) {
-            s.slot_focus = card;
-            s.chosen_args = s.card_args(card);
-            chosen = s.slots_game;
-        };
-        auto delete_focused = [&]() {
-            std::string error;
-            if (rsdkv4::delete_slot(s.slots_dir, s.slot_focus - 1, error))
-                s.delete_error.clear();
-            else
-                s.delete_error = "Could not delete the slot: " + error;
-            s.reload_slots();
-        };
-        // As rsdkv4-wasm: Left/Right go through the cards in order, Up/Down change the
-        // character on a new-game card (and move between rows elsewhere, for portrait).
-        auto slots_act = [&](Action a) {
-            const int card = s.slot_focus;
-            switch (a) {
-            case Action::Back: s.slots_open = false; break;
-            case Action::Accept: play_card(card); break;
-            case Action::More:
-                if (s.saved_slot(card)) {
-                    s.delete_open = true;
-                    s.delete_focus = 0;  // No
-                }
-                break;
-            case Action::Left:
-            case Action::Right: {
-                const Impl::SlotLayout l = s.slot_layout();
-                const int *pos = std::find(l.order, l.order + Impl::kSlotCards, card);
-                const int at = static_cast<int>(pos - l.order) + (a == Action::Left ? -1 : 1);
-                if (at >= 0 && at < Impl::kSlotCards)
-                    s.slot_focus = l.order[at];
-                break;
-            }
-            case Action::Up:
-            case Action::Down:
-                if (s.new_game_card(card)) {
-                    int &ch = s.slot_char[static_cast<std::size_t>(card)];
-                    ch = (ch + (a == Action::Up ? 3 : 1)) % 4;
-                } else {
-                    const Impl::SlotLayout l = s.slot_layout();
-                    const int next = Impl::nearest(l.min, l.max, Impl::kSlotCards, card, a);
-                    if (next >= 0)
-                        s.slot_focus = next;
-                }
-                break;
-            default: break;
-            }
-        };
         auto act = [&](Action a) {
             if (a == Action::None)
                 return;
@@ -1786,21 +1202,9 @@ int Picker::choose(const std::vector<GameStatus> &games)
                 return;
             }
             if (a == Action::Credits) {
-                if (!s.delete_open && !s.confirm_quit) {
+                if (!s.confirm_quit) {
                     s.credits_open = true;
                     s.credits_scroll = 0.0f;
-                }
-                return;
-            }
-            if (s.delete_open) {
-                if (a == Action::Left || a == Action::Right)
-                    s.delete_focus = 1 - s.delete_focus;
-                else if (a == Action::Back)
-                    s.delete_open = false;
-                else if (a == Action::Accept) {
-                    if (s.delete_focus == 1)
-                        delete_focused();
-                    s.delete_open = false;
                 }
                 return;
             }
@@ -1816,10 +1220,6 @@ int Picker::choose(const std::vector<GameStatus> &games)
                 }
                 return;
             }
-            if (s.slots_open) {
-                slots_act(a);
-                return;
-            }
             if (a == Action::Back) {
                 s.confirm_quit = true;
                 s.confirm_focus = 0;  // No
@@ -1827,9 +1227,7 @@ int Picker::choose(const std::vector<GameStatus> &games)
                 // Nothing to delete on the covers.
             } else if (a == Action::Accept) {
                 const GameStatus &game = games[static_cast<std::size_t>(s.focus)];
-                if (has_slots(game))
-                    s.open_slots(s.focus, game);
-                else if (game.available)
+                if (game.available)
                     chosen = s.focus;
                 else if (installable(game))
                     chosen = kInstallBase - s.focus;
@@ -1892,42 +1290,8 @@ int Picker::choose(const std::vector<GameStatus> &games)
                     s.credits_dragged = false;
                     break;
                 }
-                if (!s.delete_open && !s.confirm_quit && hit(p, s.credits_pill_min, s.credits_pill_max)) {
+                if (!s.confirm_quit && hit(p, s.credits_pill_min, s.credits_pill_max)) {
                     act(Action::Credits);
-                    break;
-                }
-                if (s.delete_open) {
-                    if (hit(p, delete_rects[0], delete_rects[1]))
-                        s.delete_open = false;
-                    else if (hit(p, delete_rects[2], delete_rects[3])) {
-                        delete_focused();
-                        s.delete_open = false;
-                    }
-                    break;
-                }
-                if (s.slots_open && !s.confirm_quit) {
-                    const Impl::SlotHits &h = s.slot_hits;
-                    for (int c = 0; c < Impl::kSlotCards; ++c) {
-                        int &ch = s.slot_char[static_cast<std::size_t>(c)];
-                        if (hit(p, h.trash_min[c], h.trash_max[c])) {
-                            s.slot_focus = c;
-                            s.delete_open = true;
-                            s.delete_focus = 0;
-                        } else if (hit(p, h.pick_min[c], h.pick_max[c])) {
-                            s.slot_focus = c;  // a tap on the character cycles it
-                            ch = (ch + 1) % 4;
-                        } else if (hit(p, h.button_min[c], h.button_max[c])) {
-                            play_card(c);
-                        } else if (hit(p, h.card_min[c], h.card_max[c])) {
-                            if (c == 0 || c == Impl::kMenusCard)
-                                play_card(c);  // the short cards are buttons themselves
-                            else
-                                s.slot_focus = c;
-                        } else {
-                            continue;
-                        }
-                        break;
-                    }
                     break;
                 }
                 if (s.confirm_quit) {
@@ -1961,7 +1325,7 @@ int Picker::choose(const std::vector<GameStatus> &games)
             return chosen;
 
         // Hover follows the mouse once it has moved (touch taps go through clicks above).
-        if (s.pointer_used && !s.confirm_quit && !s.slots_open && !s.credits_open) {
+        if (s.pointer_used && !s.confirm_quit && !s.credits_open) {
             int mx = 0, my = 0;
             SDL_GetMouseState(&mx, &my);
             const int tile = s.tile_at(ImVec2(static_cast<float>(mx), static_cast<float>(my)), count);
@@ -1989,23 +1353,15 @@ int Picker::choose(const std::vector<GameStatus> &games)
         s.draw_backdrop(dl, dt);
         s.draw_header(dl, u);
         play_min = play_max = ImVec2(0, 0);
-        if (s.slots_open) {
-            s.draw_slots(dl, games[static_cast<std::size_t>(s.slots_game)], dt);
-            s.draw_header(dl, u);  // again, over the slot screen's darker backdrop
-            s.draw_slot_hints(dl, u);
-        } else {
-            for (int i = 0; i < count; ++i) {
-                if (i != s.focus)
-                    s.draw_tile(dl, l, games[static_cast<std::size_t>(i)], i, dt);
-            }
-            s.draw_tile(dl, l, games[static_cast<std::size_t>(s.focus)], s.focus, dt);  // on top
-            s.draw_details(dl, l, games[static_cast<std::size_t>(s.focus)], play_min, play_max);
-            const GameStatus &focused = games[static_cast<std::size_t>(s.focus)];
-            s.draw_hints(dl, u, focused.available || installable(focused) || importable(focused) ||
-                                       !get_app_url(focused).empty());
+        for (int i = 0; i < count; ++i) {
+            if (i != s.focus)
+                s.draw_tile(dl, l, games[static_cast<std::size_t>(i)], i, dt);
         }
-        s.draw_dialog(ImGui::GetForegroundDrawList(), u, dt, s.delete_open, s.delete_anim, s.delete_focus,
-                      "Delete game " + std::to_string(s.slot_focus) + "?", delete_rects);
+        s.draw_tile(dl, l, games[static_cast<std::size_t>(s.focus)], s.focus, dt);  // on top
+        s.draw_details(dl, l, games[static_cast<std::size_t>(s.focus)], play_min, play_max);
+        const GameStatus &focused = games[static_cast<std::size_t>(s.focus)];
+        s.draw_hints(dl, u, focused.available || installable(focused) || importable(focused) ||
+                                   !get_app_url(focused).empty());
         s.draw_confirm(ImGui::GetForegroundDrawList(), u, dt, confirm_rects);
         s.draw_credits(ImGui::GetForegroundDrawList(), u, dt);
         ImGui::Render();
@@ -2017,9 +1373,7 @@ int Picker::choose(const std::vector<GameStatus> &games)
 
         // Nothing moving: sleep until the next event instead of redrawing at full rate.
         bool settled = s.backdrop_mix > 0.995f && std::abs(s.confirm_anim - (s.confirm_quit ? 1.0f : 0.0f)) < 0.005f &&
-                       std::abs(s.delete_anim - (s.delete_open ? 1.0f : 0.0f)) < 0.005f &&
-                       std::abs(s.credits_anim - (s.credits_open ? 1.0f : 0.0f)) < 0.005f &&
-                       (!s.slots_open || (s.slots_anim > 0.995f && !s.new_game_card(s.slot_focus)));
+                       std::abs(s.credits_anim - (s.credits_open ? 1.0f : 0.0f)) < 0.005f;
         for (std::size_t i = 0; i < s.lift.size(); ++i)
             settled = settled && std::abs(s.lift[i] - (static_cast<int>(i) == s.focus ? 1.0f : 0.0f)) < 0.003f;
         if (settled && s.pads.empty())
