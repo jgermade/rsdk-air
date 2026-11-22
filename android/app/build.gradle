@@ -75,10 +75,37 @@ android {
 }
 
 // The picker reads art/covers/*.jpg and fonts/*.ttf from the APK's assets, the same relative
-// paths it uses next to the desktop executable.
+// paths it uses next to the desktop executable. licenses/ holds the license of everything
+// the APK contains, named as in the desktop downloads (CMakeLists.txt, install rules); the
+// Credits screen points to it. No GLEW (desktop only) and no Sonic 3 A.I.R. (its own app).
+def apkLicenses = [
+    'LICENSE'                                                            : 'rsdk-air.txt',
+    'third_party/SDL/LICENSE.txt'                                        : 'SDL2.txt',
+    'third_party/RSDKv3-Decompilation/LICENSE.md'                        : 'RSDKv3-Decompilation.md',
+    'third_party/RSDKv4-Decompilation/LICENSE.md'                        : 'RSDKv4-Decompilation.md',
+    'third_party/RSDKv5-Decompilation/LICENSE.md'                        : 'RSDKv5-Decompilation.md',
+    'third_party/Sonic-Mania-Decompilation/LICENSE.md'                   : 'Sonic-Mania-Decompilation.md',
+    'third_party/ogg/COPYING'                                            : 'libogg.txt',
+    'third_party/vorbis/COPYING'                                         : 'libvorbis.txt',
+    'third_party/theora/COPYING'                                         : 'libtheora.txt',
+    'third_party/RSDKv5-Decompilation/dependencies/all/iniparser/LICENSE': 'iniparser.txt',
+    'third_party/RSDKv5-Decompilation/dependencies/all/miniz/LICENSE.md' : 'miniz.md',
+    'third_party/RSDKv5-Decompilation/dependencies/all/stb_vorbis/LICENSE': 'stb_vorbis.txt',
+    'third_party/RSDKv3-Decompilation/dependencies/all/theoraplay/LICENSE.txt': 'theoraplay.txt',
+    'third_party/RSDKv4-Decompilation/dependencies/all/tinyxml2/LICENSE.txt': 'tinyxml2.txt',
+    'third_party/stb/LICENSE'                                            : 'stb.txt',
+    'third_party/imgui/LICENSE.txt'                                      : 'imgui.txt',
+    'assets/fonts/Inter-LICENSE.txt'                                     : 'Inter-OFL.txt',
+]
 def copyPickerAssets = tasks.register('copyPickerAssets', Sync) {
     from('../../art') { into 'art' }
     from('../../assets/fonts') { into 'fonts' }
+    apkLicenses.each { source, name ->
+        from("../../${source}") {
+            into 'licenses'
+            rename { name }
+        }
+    }
     into layout.buildDirectory.dir('generated/picker-assets')
 }
 tasks.named('preBuild') { dependsOn copyPickerAssets }

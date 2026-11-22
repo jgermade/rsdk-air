@@ -11,6 +11,7 @@
 // SPDX-License-Identifier: MIT (this file); it links against the RSDKv3 decompilation.
 
 #include "RetroEngine.hpp"
+#include "menu_glue.hpp"
 
 #include <rsdkair/engine.h>
 #include <rsdkair/ini.hpp>
@@ -21,14 +22,134 @@
 #include <filesystem>
 #include <string>
 #include <system_error>
+#include <vector>
 
 namespace fs = std::filesystem;
+
+extern SDL_AudioDeviceID audioDevice;  // RSDKv3's Audio.cpp (not in its headers)
 
 namespace {
 
 const char *const kRequired[] = {"Data.rsdk", nullptr};
 const RsdkAirGameInfo kSonicCD = {"soniccd", "Sonic CD", kRequired};
 const RsdkAirGameInfo *const kGames[] = {&kSonicCD, nullptr};
+
+// ---- In-game menu (engines/common/menu_glue.hpp) ---------------------------------------
+// No save slots here (no slot bridge for Sonic CD yet): Play, the game's own screens,
+// settings, back to the launcher.
+
+rsdkair_menu::Glue g_menu;
+unsigned g_pad = 0;  // on-screen controls held (RSDKAIR_PAD_*)
+
+struct Screen {
+    int list;
+    int stage;
+    const char *label;
+};
+std::vector<Screen> g_screens;
+bool g_screens_found = false;
+
+void find_screens()
+{
+    if (g_screens_found)
+        return;
+    g_screens_found = true;
+    static const struct {
+        const char *name;
+        const char *label;
+    } kWanted[] = {{"TITLE SCREEN", "Title screen"},
+                   {"LEVEL SELECT", "Level select"},
+                   {"STAGE SELECT", "Stage select"},
+                   {"STAGE MENU", "Stage menu"}};
+    for (const auto &wanted : kWanted) {
+        bool found = false;
+        for (int list = 0; list < STAGELIST_MAX && !found; ++list) {
+            for (int i = 0; i < stageListCount[list] && !found; ++i) {
+                char name[0x40];
+                std::snprintf(name, sizeof(name), "%s", stageList[list][i].name);
+                for (char *end = name + std::strlen(name); end > name && end[-1] == ' '; --end)
+                    end[-1] = 0;
+                if (std::strcmp(name, wanted.name) == 0) {
+                    g_screens.push_back({list, i, wanted.label});
+                    found = true;
+                }
+            }
+        }
+    }
+}
+
+const char *const kSmoothing[] = {"Sharp pixels", "Smooth", nullptr};
+const char *const kOnOff[] = {"Off", "On", nullptr};
+#if RETRO_PLATFORM == RETRO_ANDROID
+constexpr int kSettingCount = 3;
+#else
+constexpr int kSettingCount = 4;
+#endif
+
+int setting_get(int i, RsdkAirSetting *s)
+{
+    *s = RsdkAirSetting{};
+    switch (i) {
+    case 0: *s = {"Music volume", RSDKAIR_SETTING_RANGE, 0, MAX_VOLUME, 10, nullptr, bgmVolume}; return 1;
+    case 1: *s = {"Sound volume", RSDKAIR_SETTING_RANGE, 0, MAX_VOLUME, 10, nullptr, sfxVolume}; return 1;
+    case 2: *s = {"Smoothing", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kSmoothing, Engine.scalingMode ? 1 : 0}; return 1;
+    case 3: *s = {"Fullscreen", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff, Engine.isFullScreen ? 1 : 0}; return 1;
+    default: return 0;
+    }
+}
+
+int clamp_volume(int v) { return v < 0 ? 0 : v > MAX_VOLUME ? MAX_VOLUME : v; }
+
+void setting_set(int i, int v)
+{
+    switch (i) {
+    case 0: bgmVolume = clamp_volume(v); break;
+    case 1: sfxVolume = clamp_volume(v); break;
+    case 2: Engine.scalingMode = v ? 1 : 0; break;
+    case 3:
+        Engine.startFullScreen = v != 0;
+        SetFullScreen(v != 0);
+        break;
+    default: return;
+    }
+    WriteSettings();
+}
+
+void setup_menu(const RsdkAirHost *host)
+{
+    g_menu.host = host;
+    RsdkAirEngineControl &c = g_menu.control;
+    c.gfx = RSDKAIR_GFX_GL1;
+    c.set_paused = [](int paused) {
+        if (audioDevice > 0)
+            SDL_PauseAudioDevice(audioDevice, paused);
+    };
+    c.request_exit = [] { Engine.running = false; };
+    c.screen_count = [] {
+        find_screens();
+        return static_cast<int>(g_screens.size());
+    };
+    c.screen_name = [](int i) {
+        return i >= 0 && i < static_cast<int>(g_screens.size()) ? g_screens[static_cast<std::size_t>(i)].label : "";
+    };
+    c.load_screen = [](int i) {
+        if (i < 0 || i >= static_cast<int>(g_screens.size()))
+            return;
+        const Screen &s = g_screens[static_cast<std::size_t>(i)];
+        StopMusic();
+        StopAllSfx();
+        ReleaseStageSfx();
+        activeStageList = s.list;
+        stageListPosition = s.stage;
+        stageMode = STAGEMODE_LOAD;
+        Engine.gameMode = ENGINE_MAINGAME;
+    };
+    c.setting_count = [] { return kSettingCount; };
+    c.setting_get = setting_get;
+    c.setting_set = setting_set;
+    c.set_pad = [](unsigned buttons) { g_pad = buttons; };
+    c.hide_touch_controls = [](int hide) { disableTouchControls = hide != 0; };
+}
 
 // Size of Engine.dataFile in RetroEngine.hpp, terminator included.
 constexpr std::size_t kDataFileMax = 0x80;
@@ -48,6 +169,13 @@ bool supported(const char *id)
 
 // Where InitUserdata puts gamePath on macOS and Android (patched Userdata.cpp).
 const char *rsdkair_rsdkv3_game_path() { return g_game_path.c_str(); }
+
+// Called from the patched RetroEngine.cpp (engines/rsdkv3/CMakeLists.txt).
+int rsdkair_rsdkv3_menu_event(const void *event) { return g_menu.event(event); }
+void rsdkair_rsdkv3_menu_frame() { g_menu.frame(Engine.window); }
+
+// On-screen controls (patched Input.cpp): input buttons 0-4 are up, down, left, right, A.
+bool rsdkair_rsdkv3_pad_held(int button) { return button >= 0 && button <= 4 && (g_pad & (1u << button)) != 0; }
 
 #if RETRO_PLATFORM == RETRO_OSX
 // Upstream implements this in dependencies/mac/cocoaHelpers.mm (the app bundle's resources);
@@ -121,10 +249,13 @@ RSDKAIR_EXPORT int rsdkair_engine_main(const RsdkAirEngineArgs *args)
         return RSDKAIR_EXIT_ENGINE_FAILED;
     }
 
+    setup_menu(args->host);
     Engine.Init();
     if (!Engine.running)
         return RSDKAIR_EXIT_ENGINE_FAILED;
-    Engine.Run();
+    g_menu.attach(Engine.window, true);  // the start screen: play, screens, settings
+    if (Engine.running)                  // unless the player went back to the launcher from it
+        Engine.Run();
     return RSDKAIR_EXIT_OK;
 }
 

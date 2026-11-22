@@ -18,7 +18,7 @@ target_compile_definitions(rsdkair_ui_deps PUBLIC IMGUI_DISABLE_OBSOLETE_FUNCTIO
 target_link_libraries(rsdkair_ui_deps PUBLIC SDL2::SDL2)
 set_target_properties(rsdkair_ui_deps PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-set(launcher_sources main.cpp picker.cpp)
+set(launcher_sources main.cpp picker.cpp game_menu.cpp)
 if(ANDROID)
     add_library(rsdk-air SHARED ${launcher_sources})
     set_target_properties(rsdk-air PROPERTIES OUTPUT_NAME main)
@@ -32,6 +32,15 @@ endif()
 
 target_link_libraries(rsdk-air PRIVATE rsdkair_core rsdkair_ui_deps SDL2::SDL2)
 
+# The in-game menu (game_menu.cpp) draws through the engine's fixed-function OpenGL 1.x
+# context (RSDKv3/v4): desktop OpenGL, or OpenGL ES 1 (GLESv1_CM) on Android.
+if(ANDROID)
+    target_link_libraries(rsdk-air PRIVATE GLESv1_CM)
+else()
+    find_package(OpenGL REQUIRED)
+    target_link_libraries(rsdk-air PRIVATE OpenGL::GL)
+endif()
+
 # The picker's art and fonts, next to the executable in the build tree (the install rules
 # and the Android assets put them in the same relative places).
 if(NOT ANDROID)
@@ -41,3 +50,13 @@ if(NOT ANDROID)
         VERBATIM)
 endif()
 rsdkair_warnings(rsdk-air)
+
+# A stand-in engine for trying the in-game menu without game data (menu_demo.cpp).
+if(RSDKAIR_BUILD_TESTS AND NOT ANDROID)
+    add_executable(rsdkair_menu_demo menu_demo.cpp game_menu.cpp)
+    target_link_libraries(rsdkair_menu_demo PRIVATE rsdkair_core rsdkair_ui_deps SDL2::SDL2 OpenGL::GL)
+    if(TARGET SDL2::SDL2main)
+        target_link_libraries(rsdkair_menu_demo PRIVATE SDL2::SDL2main)
+    endif()
+    rsdkair_warnings(rsdkair_menu_demo)
+endif()

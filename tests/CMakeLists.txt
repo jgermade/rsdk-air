@@ -19,7 +19,7 @@ endforeach()
 
 # The real executable, without a display: --version and --list never open a window.
 add_test(NAME launcher_version COMMAND rsdk-air --version)
-set_tests_properties(launcher_version PROPERTIES PASS_REGULAR_EXPRESSION "rsdk-air .* \\(engine ABI 1, Plus o(n|ff)\\)")
+set_tests_properties(launcher_version PROPERTIES PASS_REGULAR_EXPRESSION "rsdk-air .* \\(engine ABI 2, Plus o(n|ff)\\)")
 
 set(empty_root "${CMAKE_CURRENT_BINARY_DIR}/empty-root")
 add_test(NAME launcher_list COMMAND rsdk-air --list --data-root "${empty_root}")

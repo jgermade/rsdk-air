@@ -9,6 +9,7 @@
 // The picker is a mosaic of game covers (picker.cpp, Dear ImGui). If no window can be
 // opened it falls back to a plain SDL message box with one button per game.
 
+#include "game_menu.hpp"
 #include "picker.hpp"
 
 #include <rsdkair/catalog.hpp>
@@ -160,12 +161,16 @@ int run_game(const Options &options, const fs::path &root)
     }
 #endif
 
+    // The in-game menu (start screen and pause menu), drawn over the engine's window.
+    GameMenu menu(std::string(game->id), std::string(game->title), status.save_dir / "rsdk-air.ini");
+
     EngineRun run;
     run.module = module_path(game->module);
     run.game_id = std::string(game->id);
     run.data_dir = status.data_dir;
     run.save_dir = status.save_dir;
     run.extra_args = options.extra_args;
+    run.host = menu.host();
 
     std::string error;
     const int code = run_engine(run, error);
@@ -191,7 +196,8 @@ bool wait_for_return(std::string &error)
     return true;
 }
 
-bool start_game_process(const GameSpec &game, const fs::path &root, std::string &error)
+bool start_game_process(const GameSpec &game, const fs::path &root, const std::vector<std::string> &args,
+                        std::string &error)
 {
     if (game.module == "sonic3air") {
         const fs::path rom = game_data_dir(root, game) / path_from_utf8(std::string(game.required.front()));
@@ -210,11 +216,20 @@ bool start_game_process(const GameSpec &game, const fs::path &root, std::string 
         return false;
     }
     jclass cls = env->GetObjectClass(activity);
-    jmethodID start = env->GetMethodID(cls, "startGame", "(Ljava/lang/String;Ljava/lang/String;)V");
+    jmethodID start = env->GetMethodID(cls, "startGame", "(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;)V");
     if (start) {
         jstring id = env->NewStringUTF(std::string(game.id).c_str());
         jstring data_root = env->NewStringUTF(path_to_utf8(root).c_str());
-        env->CallVoidMethod(activity, start, id, data_root);
+        jclass string_cls = env->FindClass("java/lang/String");
+        jobjectArray jargs = env->NewObjectArray(static_cast<jsize>(args.size()), string_cls, nullptr);
+        for (std::size_t i = 0; i < args.size(); ++i) {
+            jstring a = env->NewStringUTF(args[i].c_str());
+            env->SetObjectArrayElement(jargs, static_cast<jsize>(i), a);
+            env->DeleteLocalRef(a);
+        }
+        env->CallVoidMethod(activity, start, id, data_root, jargs);
+        env->DeleteLocalRef(jargs);
+        env->DeleteLocalRef(string_cls);
         env->DeleteLocalRef(id);
         env->DeleteLocalRef(data_root);
     }
@@ -231,14 +246,20 @@ bool start_game_process(const GameSpec &game, const fs::path &root, std::string 
     return wait_for_return(error);
 }
 #else
-bool start_game_process(const GameSpec &game, const fs::path &root, std::string &error)
+bool start_game_process(const GameSpec &game, const fs::path &root, const std::vector<std::string> &args,
+                        std::string &error)
 {
     const fs::path exe = self_executable();
     if (exe.empty()) {
         error = "cannot find the rsdk-air executable";
         return false;
     }
-    const int code = run_child(exe, {"--game", std::string(game.id), "--data-root", path_to_utf8(root)}, error);
+    std::vector<std::string> child_args = {"--game", std::string(game.id), "--data-root", path_to_utf8(root)};
+    if (!args.empty()) {
+        child_args.emplace_back("--");  // the rest goes to the engine module
+        child_args.insert(child_args.end(), args.begin(), args.end());
+    }
+    const int code = run_child(exe, child_args, error);
     if (code < 0)
         return false;
     if (code != kExitOk) {
@@ -306,7 +327,7 @@ int run_message_box_picker(const fs::path &root)
 
         std::string error;
         const GameSpec &game = *available[static_cast<std::size_t>(choice)]->spec;
-        if (!start_game_process(game, root, error)) {
+        if (!start_game_process(game, root, {}, error)) {
             if (error.empty())
                 break;  // the app is quitting
             show_error(std::string(game.title), error);
@@ -491,7 +512,7 @@ int run_picker(const fs::path &root)
             break;
         const GameSpec &game = *games[static_cast<std::size_t>(choice)].spec;
         picker.suspend();
-        const bool started = start_game_process(game, root, error);
+        const bool started = start_game_process(game, root, {}, error);
         picker.resume();
         if (!started) {
             if (error.empty())

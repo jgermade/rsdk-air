@@ -35,6 +35,15 @@ void clear_slot(int base, int character, int zone)
 
 } // namespace
 
+void enter_game_loop()
+{
+    ClearNativeObjects();
+    CREATE_ENTITY(RetroGameLoop);
+    if (Engine.gameDeviceType == RETRO_MOBILE)
+        CREATE_ENTITY(VirtualDPad);
+    Engine.gameMode = ENGINE_MAINGAME;
+}
+
 void delete_save(int slot)
 {
     if (slot < 0 || slot > 3)
@@ -72,6 +81,7 @@ void start_game(int slot, int player)
             SetGlobalVariableByName("specialStage.nextZone", nextZone - 1);
             InitStartingStage(STAGELIST_REGULAR, nextZone - 1, saveRAM[base + SAVE_CHARACTER]);
         }
+        enter_game_loop();
         return;
     }
 
@@ -107,6 +117,7 @@ void start_game(int slot, int player)
     // screen) instead, which a player who already picked a slot does not want to see again.
     SetGlobalVariableByName("specialStage.nextZone", 0);
     InitStartingStage(STAGELIST_REGULAR, 0, player);
+    enter_game_loop();
 }
 
 } // namespace rsdkv4_bridge

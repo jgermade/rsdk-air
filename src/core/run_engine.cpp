@@ -60,6 +60,7 @@ int run_engine(const EngineRun &run, std::string &error)
     args.save_dir = save_dir.c_str();
     args.argc = static_cast<int>(storage.size());
     args.argv = argv.data();
+    args.host = run.host;
     return engine_main(&args);
 }
 

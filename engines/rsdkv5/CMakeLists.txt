@@ -21,7 +21,10 @@ endif()
 # --- patches ------------------------------------------------------------------------
 # InitUserDirectory: on macOS upstream uses <app resources>/RSDKv5/; here the module's
 # save folder (rsdkair_rsdkv5_user_dir, rsdkv5_module.cpp). Linux and Windows already use
-# the working directory, which the module sets to the save folder.
+# the working directory, which the module sets to the save folder. Android (built as
+# Linux) gets the absolute folder too: the engine opens files with SDL_RWFromFile, and SDL
+# on Android resolves relative paths against the app's internal storage, not the working
+# directory, so "./" + "../../games/mania/Data.rsdk" pointed outside the data root.
 rsdkair_patch_begin(storage "${UP}/RSDKv5/RSDK/User/Core/UserStorage.cpp")
 rsdkair_patch_replace(storage [=[void RSDK::SKU::InitUserDirectory()]=]
 [=[const char *rsdkair_rsdkv5_user_dir(); // rsdk-air: rsdkv5_module.cpp
@@ -29,6 +32,12 @@ rsdkair_patch_replace(storage [=[void RSDK::SKU::InitUserDirectory()]=]
 void RSDK::SKU::InitUserDirectory()]=])
 rsdkair_patch_replace(storage [=[    sprintf_s(buffer, sizeof(buffer), "%s/RSDKv5/", getResourcesPath());]=]
 [=[    sprintf_s(buffer, sizeof(buffer), "%s", rsdkair_rsdkv5_user_dir()); // rsdk-air]=])
+rsdkair_patch_replace(storage [=[    SKU::SetUserFileCallbacks("./", NULL, NULL);]=]
+[=[#if defined(RSDKAIR_ANDROID_AS_LINUX) // rsdk-air: SDL reads relative paths from internal storage
+    SKU::SetUserFileCallbacks(rsdkair_rsdkv5_user_dir(), NULL, NULL);
+#else
+    SKU::SetUserFileCallbacks("./", NULL, NULL);
+#endif]=])
 rsdkair_patch_end(storage RSDKV5_USERSTORAGE_CPP)
 
 # RetroEngine.hpp (Android only): pick the Linux platform instead of Android, so the SDL2
@@ -55,6 +64,49 @@ if(ANDROID)
     configure_file("${RSDKV5_ENGINE_HPP}" "${RSDKV5_SHADOW_INCLUDE}/RSDK/Core/RetroEngine.hpp" COPYONLY)
 endif()
 
+# The in-game menu (engines/common/menu_glue.hpp): every polled SDL event goes to the menu
+# first, and each frame calls it just before SDL_RenderPresent. The SDL2 render device is
+# #included by Drawing.cpp, so Drawing.cpp is patched to include the patched copy.
+rsdkair_patch_begin(sdl2rd "${UP}/RSDKv5/RSDK/Graphics/SDL2/SDL2RenderDevice.cpp")
+rsdkair_patch_replace(sdl2rd [=[SDL_Window *RenderDevice::window     = nullptr;]=]
+[=[int rsdkair_rsdkv5_menu_event(const void *event); // rsdk-air: rsdkv5_module.cpp
+void rsdkair_rsdkv5_menu_frame();
+
+SDL_Window *RenderDevice::window     = nullptr;]=])
+rsdkair_patch_replace(sdl2rd [=[    while (SDL_PollEvent(&sdlEvent)) {
+        ProcessEvent(sdlEvent);]=]
+[=[    while (SDL_PollEvent(&sdlEvent)) {
+        if (rsdkair_rsdkv5_menu_event(&sdlEvent)) // rsdk-air: the in-game menu took it
+            continue;
+        ProcessEvent(sdlEvent);]=])
+rsdkair_patch_replace(sdl2rd [=[    // no change here
+    SDL_RenderPresent(renderer);]=]
+[=[    // no change here
+    rsdkair_rsdkv5_menu_frame(); // rsdk-air: may open the in-game menu
+    SDL_RenderPresent(renderer);]=])
+rsdkair_patch_end(sdl2rd RSDKV5_SDL2RENDERDEVICE_CPP)
+rsdkair_patch_begin(drawing "${UP}/RSDKv5/RSDK/Graphics/Drawing.cpp")
+rsdkair_patch_replace(drawing [=[#include "SDL2/SDL2RenderDevice.cpp"]=]
+"#include \"${RSDKV5_SDL2RENDERDEVICE_CPP}\" // rsdk-air: patched copy")
+rsdkair_patch_end(drawing RSDKV5_DRAWING_CPP)
+# On-screen controls: their buttons are added as held, for player 1 and "any", before the
+# engine works out presses and releases from what its input devices reported.
+rsdkair_patch_begin(input "${UP}/RSDKv5/RSDK/Input/Input.cpp")
+rsdkair_patch_replace(input [=[#include "RSDK/Core/RetroEngine.hpp"]=]
+[=[#include "RSDK/Core/RetroEngine.hpp"
+
+void rsdkair_rsdkv5_apply_pad(); // rsdk-air: rsdkv5_module.cpp]=])
+rsdkair_patch_replace(input [=[#if !RETRO_REV02 && RETRO_INPUTDEVICE_KEYBOARD
+    RSDK::SKU::HandleSpecialKeys();
+#endif
+]=]
+[=[#if !RETRO_REV02 && RETRO_INPUTDEVICE_KEYBOARD
+    RSDK::SKU::HandleSpecialKeys();
+#endif
+    rsdkair_rsdkv5_apply_pad(); // rsdk-air: the in-game menu's on-screen controls
+]=])
+rsdkair_patch_end(input RSDKV5_INPUT_CPP)
+
 set(V5 "${UP}/RSDKv5")
 set(RSDKV5_SOURCES
     ${V5}/RSDK/Core/RetroEngine.cpp
@@ -65,14 +117,14 @@ set(RSDKV5_SOURCES
     ${V5}/RSDK/Dev/Debug.cpp
     ${V5}/RSDK/Storage/Storage.cpp
     ${V5}/RSDK/Storage/Text.cpp
-    ${V5}/RSDK/Graphics/Drawing.cpp
+    ${RSDKV5_DRAWING_CPP}
     ${V5}/RSDK/Graphics/Scene3D.cpp
     ${V5}/RSDK/Graphics/Animation.cpp
     ${V5}/RSDK/Graphics/Sprite.cpp
     ${V5}/RSDK/Graphics/Palette.cpp
     ${V5}/RSDK/Graphics/Video.cpp
     ${V5}/RSDK/Audio/Audio.cpp
-    ${V5}/RSDK/Input/Input.cpp
+    ${RSDKV5_INPUT_CPP}
     ${V5}/RSDK/Scene/Scene.cpp
     ${V5}/RSDK/Scene/Collision.cpp
     ${V5}/RSDK/Scene/Object.cpp
@@ -130,6 +182,9 @@ if(ANDROID)
     target_compile_definitions(rsdkv5 PRIVATE RSDKAIR_ANDROID_AS_LINUX=1)
 endif()
 target_include_directories(rsdkv5 PRIVATE
+    "${PROJECT_SOURCE_DIR}/engines/common"
+    "${V5}/RSDK/Graphics"  # the patched Drawing.cpp's relative includes (Legacy/, SDL2/…)
+    "${V5}/RSDK/Input"     # the patched Input.cpp's (SDL2/, Keyboard/…)
     "${V5}"
     "${UP}/dependencies/all"
     "${UP}/dependencies/all/tinyxml2"

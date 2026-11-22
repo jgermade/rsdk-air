@@ -41,6 +41,71 @@ rsdkair_patch_replace(userdata [=[        env->DeleteLocalRef(activity);
     char buffer[0x100];]=])
 rsdkair_patch_end(userdata RSDKV4_USERDATA_CPP)
 
+# The in-game menu (engines/common/menu_glue.hpp): every polled SDL event goes to the
+# menu first, and each frame calls it just before the swap.
+rsdkair_patch_begin(engine "${UP}/RSDKv4/RetroEngine.cpp")
+rsdkair_patch_replace(engine [=[#include "RetroEngine.hpp"]=]
+[=[#include "RetroEngine.hpp"
+
+int rsdkair_rsdkv4_menu_event(const void *event); // rsdk-air: rsdkv4_module.cpp
+void rsdkair_rsdkv4_menu_frame();]=])
+rsdkair_patch_replace(engine [=[    while (SDL_PollEvent(&Engine.sdlEvents)) {]=]
+[=[    while (SDL_PollEvent(&Engine.sdlEvents)) {
+        if (rsdkair_rsdkv4_menu_event(&Engine.sdlEvents)) // rsdk-air: the in-game menu took it
+            continue;]=])
+rsdkair_patch_replace(engine [=[                SDL_GL_SwapWindow(Engine.window);]=]
+[=[                rsdkair_rsdkv4_menu_frame(); // rsdk-air: may open the in-game menu
+                SDL_GL_SwapWindow(Engine.window);]=])
+rsdkair_patch_end(engine RSDKV4_RETROENGINE_CPP)
+
+# The game's own pause (the touch pause button, Start, losing focus) sets ENGINE_INITPAUSE,
+# which RetroGameLoop answers with the native vertical pause menu. It opens the in-game
+# menu instead; the last frame is drawn again so the menu has it as its backdrop.
+rsdkair_patch_begin(gameloop "${UP}/RSDKv4/NativeObjects/RetroGameLoop.cpp")
+rsdkair_patch_replace(gameloop [=[#include "RetroEngine.hpp"]=]
+[=[#include "RetroEngine.hpp"
+
+void rsdkair_rsdkv4_menu_open(); // rsdk-air: rsdkv4_module.cpp]=])
+rsdkair_patch_replace(gameloop [=[        case ENGINE_INITPAUSE:
+            mixFiltersOnJekyll = false;
+            InitPauseMenu();
+            break;]=]
+[=[        case ENGINE_INITPAUSE: // rsdk-air: the in-game menu, not the native pause menu
+            Engine.gameMode = ENGINE_MAINGAME;
+            TransferRetroBuffer();
+            RenderRetroBuffer(64, 160.0);
+            rsdkair_rsdkv4_menu_open();
+            break;]=])
+rsdkair_patch_end(gameloop RSDKV4_RETROGAMELOOP_CPP)
+
+# On-screen controls (drawn by the in-game menu): their buttons count as held, like a
+# key or a pad button, and the game's own touch pad (VirtualDPad, VirtualDPadM for
+# multiplayer) is not drawn while they are on.
+rsdkair_patch_begin(input "${UP}/RSDKv4/Input.cpp")
+rsdkair_patch_replace(input [=[#include "RetroEngine.hpp"]=]
+[=[#include "RetroEngine.hpp"
+
+bool rsdkair_rsdkv4_pad_held(int button); // rsdk-air: rsdkv4_module.cpp]=])
+rsdkair_patch_replace(input [=[            if (keyState[inputDevice[i].keyMappings]) {
+                inputDevice[i].setHeld();
+                if (!inputDevice[INPUT_ANY].hold)]=]
+[=[            if (keyState[inputDevice[i].keyMappings] || rsdkair_rsdkv4_pad_held(i)) { // rsdk-air
+                inputDevice[i].setHeld();
+                if (!inputDevice[INPUT_ANY].hold)]=])
+rsdkair_patch_replace(input [=[            if (getControllerButton(inputDevice[i].contMappings)) {]=]
+[=[            if (getControllerButton(inputDevice[i].contMappings) || rsdkair_rsdkv4_pad_held(i)) { // rsdk-air]=])
+rsdkair_patch_end(input RSDKV4_INPUT_CPP)
+foreach(pad VirtualDPad VirtualDPadM)
+    rsdkair_patch_begin(${pad} "${UP}/RSDKv4/NativeObjects/${pad}.cpp")
+    rsdkair_patch_replace(${pad} [=[#include "RetroEngine.hpp"]=]
+[=[#include "RetroEngine.hpp"
+
+bool rsdkair_rsdkv4_touch_hidden(); // rsdk-air: rsdkv4_module.cpp]=])
+    rsdkair_patch_replace(${pad} "void ${pad}_Main(void *objPtr)\n{\n    RSDK_THIS(${pad});\n"
+"void ${pad}_Main(void *objPtr)\n{\n    RSDK_THIS(${pad});\n    if (rsdkair_rsdkv4_touch_hidden()) // rsdk-air: our on-screen controls instead\n        return;\n")
+    rsdkair_patch_end(${pad} RSDKV4_${pad}_CPP)
+endforeach()
+
 set(RSDKV4_SOURCES
     ${UP}/dependencies/all/tinyxml2/tinyxml2.cpp
     ${UP}/RSDKv4/Animation.cpp
@@ -58,7 +123,7 @@ set(RSDKV4_SOURCES
     ${UP}/RSDKv4/Palette.cpp
     ${UP}/RSDKv4/Reader.cpp
     ${UP}/RSDKv4/Renderer.cpp
-    ${UP}/RSDKv4/RetroEngine.cpp
+    ${RSDKV4_RETROENGINE_CPP}
     ${UP}/RSDKv4/Scene.cpp
     ${UP}/RSDKv4/Scene3D.cpp
     ${UP}/RSDKv4/Script.cpp
@@ -77,6 +142,10 @@ foreach(object
         VirtualDPadM ZoneButton)
     list(APPEND RSDKV4_SOURCES "${UP}/RSDKv4/NativeObjects/${object}.cpp")
 endforeach()
+list(TRANSFORM RSDKV4_SOURCES REPLACE ".*/NativeObjects/RetroGameLoop\\.cpp$" "${RSDKV4_RETROGAMELOOP_CPP}")
+list(TRANSFORM RSDKV4_SOURCES REPLACE ".*/NativeObjects/VirtualDPad\\.cpp$" "${RSDKV4_VirtualDPad_CPP}")
+list(TRANSFORM RSDKV4_SOURCES REPLACE ".*/NativeObjects/VirtualDPadM\\.cpp$" "${RSDKV4_VirtualDPadM_CPP}")
+list(TRANSFORM RSDKV4_SOURCES REPLACE ".*/RSDKv4/Input\\.cpp$" "${RSDKV4_INPUT_CPP}")
 
 rsdkair_engine_module(rsdkv4
     rsdkv4_module.cpp
@@ -87,6 +156,7 @@ rsdkair_engine_module(rsdkv4
 set_target_properties(rsdkv4 PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 
 target_include_directories(rsdkv4 PRIVATE
+    "${PROJECT_SOURCE_DIR}/engines/common"
     "${UP}/RSDKv4"
     "${UP}/RSDKv4/NativeObjects"
     "${UP}/dependencies/all/stb-image"

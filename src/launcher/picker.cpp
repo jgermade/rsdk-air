@@ -163,6 +163,94 @@ float cover_anchor_x(std::string_view id)
     return 0.5f;
 }
 
+// Credits ------------------------------------------------------------------------------
+//
+// The RSDK and Sonic Mania decompilation licenses require crediting the original and the
+// decompilation authors (names as their LICENSE.md files give them); Sonic 3 A.I.R. is
+// GPL-3.0, so its source is pointed to. See ROADMAP/2026-11-20/upstreams-and-licensing.md.
+
+// One line under a game's title: who made the engine it runs on.
+std::string engine_credit(std::string_view module)
+{
+    if (module == "rsdkv3")
+        return "RSDK v3 by Christian \"Taxman\" Whitehead. Decompilation by Rubberduckycooly and st\xC3\x97tic.";
+    if (module == "rsdkv4")
+        return "RSDK v4 by Christian \"Taxman\" Whitehead. Decompilation by Rubberduckycooly and st\xC3\x97tic.";
+    if (module == "rsdkv5")
+        return "RSDK v5 by Evening Star. Decompilations by Rubberduckycooly, chuliRMG and st\xC3\x97tic.";
+    if (module == "sonic3air")
+        return "Sonic 3 A.I.R. by Eukaryot (GPL-3.0).";
+    return {};
+}
+
+struct Credit {
+    const char *what;
+    const char *who;
+};
+
+struct CreditSection {
+    const char *title;
+    std::vector<Credit> lines;
+};
+
+const std::vector<CreditSection> &credits()
+{
+    static const std::vector<CreditSection> sections = {
+        {"GAME ENGINES",
+         {
+             {"RSDK v3 and v4 (Sonic CD, Sonic 1, Sonic 2)",
+              "Original engine by Christian \"Taxman\" Whitehead. Decompilation by Rubberduckycooly and "
+              "st\xC3\x97tic (RSDKModding). RSDKv3/v4 Decompilation License: non-commercial."},
+             {"RSDK v5U (Sonic Mania)",
+              "Original engine by Evening Star. Decompilation by Rubberduckycooly and chuliRMG (RSDKModding). "
+              "RSDKv5(U) Decompilation License: non-commercial."},
+             {"Sonic Mania game code",
+              "Decompilation by Rubberduckycooly, with st\xC3\x97tic (RSDKModding). Sonic Mania Decompilation "
+              "License: non-commercial."},
+             {"Sonic 3 A.I.R.",
+              "By Eukaryot. GPL-3.0, source code at github.com/Eukaryot/sonic3air. It runs as its own program "
+              "(its own app on Android), never inside rsdk-air."},
+         }},
+        {"LIBRARIES",
+         {
+             {"SDL2", "Sam Lantinga and contributors. zlib License."},
+             {"Dear ImGui", "Omar Cornut and contributors. MIT License."},
+             {"libogg, libvorbis, libtheora", "Xiph.Org Foundation. BSD License."},
+             {"stb_image, stb_vorbis", "Sean Barrett. MIT License or public domain."},
+             {"tinyxml2, theoraplay", "Lee Thomason; Ryan C. Gordon. zlib License."},
+             {"iniparser, miniz", "Nicolas Devillard; Rich Geldreich and others. MIT License."},
+             {"GLEW (desktop)", "Modified BSD, Mesa (MIT) and Khronos licenses."},
+             {"Inter (font)", "Rasmus Andersson. SIL Open Font License 1.1."},
+         }},
+        {"ART",
+         {
+             {"Covers", "Fan art made for play.germade by its owner, in the style of the games."},
+             {"Save screen", "Characters and zone pictures from rsdkv4-wasm (wasm-gaming), after craft's game "
+                             "launcher."},
+         }},
+        {"RSDK-AIR",
+         {
+             {"rsdk-air", "A free, non-commercial fan project. MIT License, source code at "
+                          "github.com/jgermade/rsdk-air. The license texts of everything above are in the "
+                          "licenses folder of each download."},
+             {"SEGA", "Not affiliated with or endorsed by SEGA. Sonic the Hedgehog and its characters are "
+                      "trademarks of SEGA. Play with your own copy of the games."},
+         }},
+    };
+    return sections;
+}
+
+// The same from top (0) to bottom (1), when a cover is cropped to a landscape tile
+// (portrait on a tablet, Mania's wide tile).
+float cover_anchor_y(std::string_view id)
+{
+    if (id == "soniccd")
+        return 0.92f;  // the disc at the bottom right
+    if (id == "mania")
+        return 0.3f;   // Knuckles' and Tails' heads near the top
+    return 0.5f;
+}
+
 // The engine's name as players know it, in capitals for the panel's label.
 std::string engine_label(std::string_view module)
 {
@@ -217,7 +305,7 @@ bool importable(const GameStatus &game)
 #endif
 }
 
-enum class Action { None, Left, Right, Up, Down, Accept, Back };
+enum class Action { None, Left, Right, Up, Down, Accept, Back, More, Credits };
 
 } // namespace
 
@@ -244,6 +332,15 @@ struct Picker::Impl {
     Uint32 stick_next = 0;
     bool pointer_used = false;     // hover moves the focus only after the mouse moved
     float inset_l = 0, inset_t = 0, inset_r = 0, inset_b = 0;  // unsafe screen edges (Android)
+
+    // Credits screen (a Credits pill in the header, X / C / F1).
+    bool credits_open = false;
+    float credits_anim = 0.0f;
+    float credits_scroll = 0.0f;      // pixels scrolled
+    float credits_scroll_max = 0.0f;  // from the last frame's layout
+    bool credits_dragged = false;  // the finger moved: releasing it is not a tap
+    ImVec2 credits_pill_min, credits_pill_max;
+    ImVec2 credits_close_min, credits_close_max;
 
     // Asks Android which edges of the screen are covered by system bars or a display
     // cutout (camera notch). Elsewhere the whole window is usable.
@@ -363,16 +460,23 @@ struct Picker::Impl {
         float tile_h = 0.0f;  // cover height (kCoverAspect taller)
         std::vector<ImVec2> min, max;  // cover rectangle per game
         ImVec2 panel_min, panel_max;   // area for the details panel
+        bool portrait = false;         // covers closer, no year under them
     };
 
     static constexpr float kCaption = 52.0f;
+    static constexpr float kCaptionPortrait = 0.0f;  // no title or year: the panel names the game
     static constexpr float kCoverAspect = 1.25f;  // height / width: 4:5, a little taller than wide, like a box  // title + year under a cover, at u = 1
 
-    // Scale of the whole layout: 1.0 at 1280x720.
+    // Scale of the whole layout: 1.0 at 1280x720, or at 720x1280 when upright, so a phone
+    // shows text and buttons at the same size in both orientations.
     float ui() const
     {
         const ImVec2 size = safe_size();
-        return std::clamp(std::min(size.x / 1280.0f, size.y / 720.0f), 0.5f, 2.5f);
+        // Upright: a 600x1150 reference, so a phone's header, panel and hints are as easy
+        // to read as in landscape (720x1280 came out small on phones).
+        const float scale = size.y > size.x ? std::min(size.x / 600.0f, size.y / 1150.0f)
+                                            : std::min(size.x / 1280.0f, size.y / 720.0f);
+        return std::clamp(scale, 0.5f, 2.5f);
     }
 
     Layout layout(int count) const
@@ -386,8 +490,10 @@ struct Picker::Impl {
         const float left = origin.x + margin;
         float top = 96.0f * u;
         const float width = size.x - 2 * margin;
-        int cols = std::max(1, count);
         auto tile_for = [&](int c) { return (width - static_cast<float>(c - 1) * gap) / static_cast<float>(c); };
+        if (size.y > size.x)
+            return layout_portrait(l, count, origin, size, top, 24.0f * u, margin);
+        int cols = std::max(1, count);
         while (cols > 1 && tile_for(cols) < 130.0f * u)
             --cols;
         // Leave room below for the panel (about 190 px) and the hints.
@@ -395,13 +501,16 @@ struct Picker::Impl {
         const float room = size.y - top - 64.0f * u - 200.0f * u;
         const float by_height =
             (room - static_cast<float>(rows) * (kCaption * u + gap)) / static_cast<float>(rows) / kCoverAspect;
-        l.tile = std::max(64.0f * u, std::min({tile_for(cols), by_height, 240.0f * u}));
+        // The row spans the details panel's width, as in portrait: covers as wide as that
+        // allows; if the height stops them first, the space between them grows instead.
+        l.tile = std::max(64.0f * u, std::min(tile_for(cols), by_height));
         l.tile_h = l.tile * kCoverAspect;
+        const float hgap = cols > 1 ? (width - static_cast<float>(cols) * l.tile) / static_cast<float>(cols - 1) : 0.0f;
         // Centre covers + panel (about 160 px) vertically in the space between header and hints.
         const float block = static_cast<float>(rows) * (l.tile_h + kCaption * u + gap) - gap + 22.0f * u + 160.0f * u;
         top = origin.y + std::max(top, top + (size.y - 64.0f * u - top - block) / 2);
         for (int i = 0; i < count; ++i) {
-            const float x = left + static_cast<float>(i % cols) * (l.tile + gap);
+            const float x = left + static_cast<float>(i % cols) * (l.tile + hgap);
             const float y = top + static_cast<float>(i / cols) * (l.tile_h + kCaption * u + gap);
             l.min.emplace_back(x, y);
             l.max.emplace_back(x + l.tile, y + l.tile_h);
@@ -412,21 +521,64 @@ struct Picker::Impl {
         return l;
     }
 
+    // Portrait (a phone held upright): square covers two per row; with an odd count the
+    // last one spans both columns at 16:9 (2 + 2 + 1 wide for five games).
+    Layout layout_portrait(Layout &l, int count, ImVec2 origin, ImVec2 size, float top, float gap, float margin) const
+    {
+        const float u = l.u;
+        l.portrait = true;
+        const float cap = kCaptionPortrait * u;
+        const float width = size.x - 2 * margin;  // the details panel's width
+        const int full_rows = count / 2;
+        const bool wide_last = count % 2 == 1;
+        constexpr float kWide = 9.0f / 16.0f;  // height / width of the wide cover
+        // The grid always spans the panel's width: two columns of covers. They are square
+        // when the height allows (phones); otherwise (tablets) every cover gets less tall
+        // by the same factor and becomes landscape, cropped to fit.
+        const float tile_w = count > 1 ? (width - gap) / 2 : width;
+        const float wide_full = width * kWide;
+        // Below them: the details panel (title on two lines, status, engine credit) and
+        // the hints, about 300 at scale 1.
+        const float room = size.y - top - 64.0f * u - 300.0f * u;
+        const float tall = static_cast<float>(full_rows) * tile_w + (wide_last ? wide_full : 0.0f);
+        const float fixed = static_cast<float>(full_rows) * (cap + gap) + (wide_last ? cap : -gap);
+        const float squash = tall > 0 ? std::clamp((room - fixed) / tall, 0.45f, 1.0f) : 1.0f;
+        l.tile = tile_w;
+        l.tile_h = tile_w * squash;
+        const float wide_h = wide_full * squash;
+        const float block = static_cast<float>(full_rows) * (l.tile_h + cap + gap) + (wide_last ? wide_h + cap : -gap) +
+                            22.0f * u + 250.0f * u;
+        top = origin.y + std::max(top, top + (size.y - 64.0f * u - top - block) / 2);
+        const float x0 = origin.x + margin;
+        for (int i = 0; i < count; ++i) {
+            const float y = top + static_cast<float>(i / 2) * (l.tile_h + cap + gap);
+            if (wide_last && i == count - 1) {
+                l.min.emplace_back(x0, y);
+                l.max.emplace_back(x0 + width, y + wide_h);
+            } else {
+                const float x = x0 + static_cast<float>(i % 2) * (l.tile + gap);
+                l.min.emplace_back(x, y);
+                l.max.emplace_back(x + l.tile, y + l.tile_h);
+            }
+        }
+        const float grid_bottom = l.max.empty() ? top : l.max.back().y + cap;
+        l.panel_min = ImVec2(origin.x + margin, grid_bottom + 22.0f * u);
+        l.panel_max = ImVec2(origin.x + size.x - margin, origin.y + size.y - 62.0f * u);
+        return l;
+    }
+
     // Grid helpers -------------------------------------------------------------------
 
-    void move_focus(Action action, int count)
+    // The rectangle nearest to `from` in the direction of `action`, or -1.
+    static int nearest(const ImVec2 *mins, const ImVec2 *maxs, int count, int from, Action action)
     {
-        if (count <= 0)
-            return;
-        const Layout l = layout(count);
-        const int from = focus < 0 ? 0 : focus;
-        const ImVec2 c((l.min[from].x + l.max[from].x) / 2, (l.min[from].y + l.max[from].y) / 2);
+        const ImVec2 c((mins[from].x + maxs[from].x) / 2, (mins[from].y + maxs[from].y) / 2);
         int best = -1;
         float best_score = FLT_MAX;
         for (int i = 0; i < count; ++i) {
             if (i == from)
                 continue;
-            const ImVec2 o((l.min[i].x + l.max[i].x) / 2, (l.min[i].y + l.max[i].y) / 2);
+            const ImVec2 o((mins[i].x + maxs[i].x) / 2, (mins[i].y + maxs[i].y) / 2);
             const float dx = o.x - c.x, dy = o.y - c.y;
             float along = 0, across = 0;
             switch (action) {
@@ -434,7 +586,7 @@ struct Picker::Impl {
             case Action::Right: along = dx; across = std::abs(dy); break;
             case Action::Up: along = -dy; across = std::abs(dx); break;
             case Action::Down: along = dy; across = std::abs(dx); break;
-            default: return;
+            default: return -1;
             }
             if (along <= 1.0f)
                 continue;
@@ -444,6 +596,16 @@ struct Picker::Impl {
                 best = i;
             }
         }
+        return best;
+    }
+
+    void move_focus(Action action, int count)
+    {
+        if (count <= 0)
+            return;
+        const Layout l = layout(count);
+        const int from = focus < 0 ? 0 : focus;
+        const int best = nearest(l.min.data(), l.max.data(), count, from, action);
         if (best >= 0)
             set_focus(best, count);
     }
@@ -458,7 +620,8 @@ struct Picker::Impl {
     {
         const Layout l = layout(count);
         for (int i = 0; i < count; ++i) {  // the cover and its caption
-            if (p.x >= l.min[i].x && p.x < l.max[i].x && p.y >= l.min[i].y && p.y < l.max[i].y + kCaption * l.u)
+            const float cap = (l.portrait ? kCaptionPortrait : kCaption) * l.u;
+            if (p.x >= l.min[i].x && p.x < l.max[i].x && p.y >= l.min[i].y && p.y < l.max[i].y + cap)
                 return i;
         }
         return -1;
@@ -519,6 +682,74 @@ struct Picker::Impl {
         dl->AddRect(pill_min, pill_max, rgba(255, 255, 255, 40), 999.0f, 1.0f * u);
         text(dl, font_regular, 14.0f * u,
              ImVec2(pill_min.x + 14.0f * u, (pill_min.y + pill_max.y - vs.y) / 2), rgba(220, 220, 230), version);
+
+        // Credits, left of the version: a button (tap, or X / C).
+        const char *label = "Credits";
+        const ImVec2 cs = measure(font_bold, 14.0f * u, label);
+        credits_pill_max = ImVec2(pill_min.x - 10.0f * u, pill_max.y);
+        credits_pill_min = ImVec2(credits_pill_max.x - cs.x - 28.0f * u, pill_min.y);
+        dl->AddRectFilled(credits_pill_min, credits_pill_max, rgba(255, 255, 255, 30), 999.0f);
+        dl->AddRect(credits_pill_min, credits_pill_max, rgba(255, 255, 255, 60), 999.0f, 1.0f * u);
+        text(dl, font_bold, 14.0f * u,
+             ImVec2(credits_pill_min.x + 14.0f * u, (credits_pill_min.y + credits_pill_max.y - cs.y) / 2),
+             IM_COL32_WHITE, label);
+    }
+
+    // The Credits screen: a scrolling panel over everything, Close at the bottom.
+    void draw_credits(ImDrawList *dl, float u, float dt)
+    {
+        credits_anim = approach(credits_anim, credits_open ? 1.0f : 0.0f, dt, 16.0f);
+        if (credits_anim < 0.01f)
+            return;
+        const float a = credits_anim;
+        auto col = [&](ImU32 c) { return with_alpha(c, a); };
+        const ImVec2 size = ImGui::GetIO().DisplaySize;
+        dl->AddRectFilled(ImVec2(0, 0), size, rgba(5, 5, 10, static_cast<int>(200 * a)));
+        const ImVec2 o = safe_min(), e = safe_max();
+        const float w = std::min(760.0f * u, e.x - o.x - 32.0f * u);
+        const ImVec2 min((o.x + e.x - w) / 2, o.y + 24.0f * u + (1.0f - a) * 20.0f * u);
+        const ImVec2 max(min.x + w, e.y - 24.0f * u);
+        dl->AddRectFilled(min, max, col(rgba(24, 23, 33, 250)), 22.0f * u);
+        dl->AddRect(min, max, col(rgba(255, 255, 255, 30)), 22.0f * u, 1.0f * u);
+        const float pad = 28.0f * u;
+        text(dl, font_bold, 28.0f * u, ImVec2(min.x + pad, min.y + pad - 4.0f * u), col(IM_COL32_WHITE), "Credits");
+
+        // Scrolling body, clipped between the title and the Close button.
+        const ImVec2 bmin(min.x + pad, min.y + pad + 44.0f * u), bmax(max.x - pad, max.y - pad - 58.0f * u);
+        const float text_w = bmax.x - bmin.x;
+        dl->PushClipRect(bmin, bmax, true);
+        float y = bmin.y - credits_scroll;
+        for (const CreditSection &section : credits()) {
+            text(dl, font_bold, 12.0f * u, ImVec2(bmin.x, y), col(rgba(0x8e, 0x97, 0xa9)), section.title);
+            y += 24.0f * u;
+            for (const Credit &c : section.lines) {
+                text(dl, font_bold, 15.5f * u, ImVec2(bmin.x, y), col(IM_COL32_WHITE), c.what, text_w);
+                y += measure(font_bold, 15.5f * u, c.what, text_w).y + 3.0f * u;
+                text(dl, font_regular, 14.0f * u, ImVec2(bmin.x, y), col(rgba(196, 196, 210)), c.who, text_w);
+                y += measure(font_regular, 14.0f * u, c.who, text_w).y + 14.0f * u;
+            }
+            y += 10.0f * u;
+        }
+        dl->PopClipRect();
+        const float content_h = y + credits_scroll - bmin.y;
+        credits_scroll_max = std::max(0.0f, content_h - (bmax.y - bmin.y));
+        credits_scroll = std::clamp(credits_scroll, 0.0f, credits_scroll_max);
+        if (credits_scroll_max > 0) {  // a thin scroll bar
+            const float track = bmax.y - bmin.y;
+            const float thumb = std::max(30.0f * u, track * track / content_h);
+            const float ty = bmin.y + (track - thumb) * credits_scroll / credits_scroll_max;
+            dl->AddRectFilled(ImVec2(max.x - 14.0f * u, ty), ImVec2(max.x - 10.0f * u, ty + thumb),
+                              col(rgba(255, 255, 255, 70)), 999.0f);
+        }
+
+        credits_close_max = ImVec2((min.x + max.x) / 2 + 90.0f * u, max.y - pad);
+        credits_close_min = ImVec2((min.x + max.x) / 2 - 90.0f * u, credits_close_max.y - 46.0f * u);
+        dl->AddRectFilled(credits_close_min, credits_close_max, col(IM_COL32_WHITE), 999.0f);
+        const ImVec2 ls = measure(font_bold, 18.0f * u, "Close");
+        text(dl, font_bold, 18.0f * u,
+             ImVec2((credits_close_min.x + credits_close_max.x - ls.x) / 2,
+                    (credits_close_min.y + credits_close_max.y - ls.y) / 2),
+             col(rgba(14, 13, 20)), "Close");
     }
 
     void draw_lock(ImDrawList *dl, ImVec2 max, float u)
@@ -565,7 +796,7 @@ struct Picker::Impl {
                 uv0.x = (1 - k) * cover_anchor_x(game.spec->id), uv1.x = uv0.x + k;
             } else {
                 const float k = art_aspect / tile_aspect;
-                uv0.y = (1 - k) / 2, uv1.y = (1 + k) / 2;
+                uv0.y = (1 - k) * cover_anchor_y(game.spec->id), uv1.y = uv0.y + k;
             }
             dl->AddImageRounded(texture_ref(cover.art), min, max, uv0, uv1, IM_COL32_WHITE, round);
         } else {
@@ -585,11 +816,14 @@ struct Picker::Impl {
                         with_alpha(IM_COL32_WHITE, 0.4f + 0.6f * lf), round + ring, 3.0f * u);
         }
 
-        // Title and year under the cover.
+        // Title and year under the cover (landscape; upright the details panel names it).
+        if (l.portrait)
+            return;
         const float ty = l.max[index].y + 12.0f * u + grow;
         const std::string title(game.spec->title);
         const float title_w = measure(font_bold, 15.0f * u, title).x;
-        const float title_size = title_w > l.tile ? 15.0f * u * l.tile / title_w : 15.0f * u;  // narrow tiles
+        const float tile_w = l.max[index].x - l.min[index].x;
+        const float title_size = title_w > tile_w ? 15.0f * u * tile_w / title_w : 15.0f * u;  // narrow tiles
         text(dl, focused ? font_bold : font_regular, title_size, ImVec2(l.min[index].x + 2.0f * u, ty),
              focused ? IM_COL32_WHITE : rgba(196, 196, 208), title);
         text(dl, font_regular, 12.5f * u, ImVec2(l.min[index].x + 2.0f * u, ty + 20.0f * u), rgba(140, 140, 155),
@@ -655,7 +889,10 @@ struct Picker::Impl {
         const float title_size = std::min(40.0f * u, l.panel_max.y - min.y > 150.0f * u ? 40.0f * u : 30.0f * u);
         const float title_h = measure(font_bold, title_size, title, text_w).y;
         const float line_h = measure(font_regular, 16.0f * u, line, text_w).y;
-        const float height = std::max(pad + 28.0f * u + title_h + 8.0f * u + line_h + pad, 2 * pad + 30.0f * u + 18.0f * u + 52.0f * u);
+        const std::string credit = engine_credit(game.spec->module);
+        const float credit_h = credit.empty() ? 0.0f : 10.0f * u + measure(font_regular, 13.0f * u, credit, text_w).y;
+        const float height = std::max(pad + 28.0f * u + title_h + 8.0f * u + line_h + credit_h + pad,
+                                      2 * pad + 30.0f * u + 18.0f * u + 52.0f * u);
         const ImVec2 max(l.panel_max.x, std::min(min.y + height, l.panel_max.y));
         const ImU32 bg = rgba(24, 23, 33, 235);
 
@@ -674,6 +911,10 @@ struct Picker::Impl {
         text(dl, font_bold, title_size, ImVec2(min.x + pad, y), IM_COL32_WHITE, title, text_w);
         y += title_h + 8.0f * u;
         text(dl, font_regular, 16.0f * u, ImVec2(min.x + pad, y), rgba(200, 200, 212), line, text_w);
+        if (!credit.empty()) {
+            y += line_h + 10.0f * u;
+            text(dl, font_regular, 13.0f * u, ImVec2(min.x + pad, y), rgba(140, 140, 156), credit, text_w);
+        }
 
         // Right: chips (year, status) and the Play button.
         const float rx = max.x - pad - right_w;
@@ -721,24 +962,30 @@ struct Picker::Impl {
     void draw_hint(ImDrawList *dl, float &x, float y, float u, const char *glyph, ImU32 glyph_col, const char *key,
                    const char *label)
     {
-        // Drawn right to left: label, key cap, pad glyph.
+        // Drawn right to left: label, key cap, pad glyph. With dl == nullptr only moves x
+        // (to measure a row of hints first).
         const ImVec2 ls = measure(font_regular, 14.0f * u, label);
         x -= ls.x;
-        text(dl, font_regular, 14.0f * u, ImVec2(x, y - ls.y / 2), rgba(225, 225, 235), label);
+        if (dl)
+            text(dl, font_regular, 14.0f * u, ImVec2(x, y - ls.y / 2), rgba(225, 225, 235), label);
         x -= 10.0f * u;
         if (key) {
             const ImVec2 ks = measure(font_regular, 12.0f * u, key);
             const ImVec2 kmin(x - ks.x - 14.0f * u, y - 11.0f * u);
-            dl->AddRectFilled(kmin, ImVec2(x, y + 11.0f * u), rgba(255, 255, 255, 20), 5.0f * u);
-            dl->AddRect(kmin, ImVec2(x, y + 11.0f * u), rgba(255, 255, 255, 60), 5.0f * u, 1.0f * u);
-            text(dl, font_regular, 12.0f * u, ImVec2(kmin.x + 7.0f * u, y - ks.y / 2), rgba(225, 225, 235), key);
+            if (dl) {
+                dl->AddRectFilled(kmin, ImVec2(x, y + 11.0f * u), rgba(255, 255, 255, 20), 5.0f * u);
+                dl->AddRect(kmin, ImVec2(x, y + 11.0f * u), rgba(255, 255, 255, 60), 5.0f * u, 1.0f * u);
+                text(dl, font_regular, 12.0f * u, ImVec2(kmin.x + 7.0f * u, y - ks.y / 2), rgba(225, 225, 235), key);
+            }
             x = kmin.x - 7.0f * u;
         }
         if (glyph) {
             const float r = 11.0f * u;
-            dl->AddCircleFilled(ImVec2(x - r, y), r, glyph_col);
-            const ImVec2 gs = measure(font_bold, 13.0f * u, glyph);
-            text(dl, font_bold, 13.0f * u, ImVec2(x - r - gs.x / 2, y - gs.y / 2), rgba(14, 13, 20), glyph);
+            if (dl) {
+                dl->AddCircleFilled(ImVec2(x - r, y), r, glyph_col);
+                const ImVec2 gs = measure(font_bold, 13.0f * u, glyph);
+                text(dl, font_bold, 13.0f * u, ImVec2(x - r - gs.x / 2, y - gs.y / 2), rgba(14, 13, 20), glyph);
+            }
             x -= 2 * r;
         }
         x -= 26.0f * u;
@@ -750,6 +997,7 @@ struct Picker::Impl {
         float x = e.x - kMargin * u;
         const float y = e.y - 28.0f * u;
         draw_hint(dl, x, y, u, nullptr, 0, "Arrows", "Navigate");
+        draw_hint(dl, x, y, u, "X", rgba(110, 160, 250), "C", "Credits");
         draw_hint(dl, x, y, u, "B", rgba(240, 110, 110), "Esc", "Quit");
         if (can_play)
             draw_hint(dl, x, y, u, "A", rgba(80, 220, 140), "Enter", "Play");
@@ -758,31 +1006,37 @@ struct Picker::Impl {
     // Returns the Yes/No button rectangles for mouse hits.
     void draw_confirm(ImDrawList *dl, float u, float dt, ImVec2 rects[4])
     {
-        confirm_anim = approach(confirm_anim, confirm_quit ? 1.0f : 0.0f, dt, 18.0f);
-        if (confirm_anim < 0.01f)
+        draw_dialog(dl, u, dt, confirm_quit, confirm_anim, confirm_focus, "Quit rsdk-air?", rects);
+    }
+
+    // A Yes/No question over everything, No first. `anim` eases in and out with `open`;
+    // `yes_focused` says which button has the ring; rects gets the No and Yes buttons.
+    void draw_dialog(ImDrawList *dl, float u, float dt, bool open, float &anim, int yes_focused,
+                     const std::string &question, ImVec2 rects[4])
+    {
+        anim = approach(anim, open ? 1.0f : 0.0f, dt, 18.0f);
+        if (anim < 0.01f)
             return;
         const ImVec2 size = ImGui::GetIO().DisplaySize;
-        dl->AddRectFilled(ImVec2(0, 0), size, rgba(5, 5, 10, static_cast<int>(170 * confirm_anim)));
+        dl->AddRectFilled(ImVec2(0, 0), size, rgba(5, 5, 10, static_cast<int>(170 * anim)));
         const ImVec2 half(220.0f * u, 95.0f * u);
         const ImVec2 o = safe_min(), e = safe_max();
-        const ImVec2 c((o.x + e.x) / 2, (o.y + e.y) / 2 + (1.0f - confirm_anim) * 20.0f * u);
+        const ImVec2 c((o.x + e.x) / 2, (o.y + e.y) / 2 + (1.0f - anim) * 20.0f * u);
         const ImVec2 min(c.x - half.x, c.y - half.y), max(c.x + half.x, c.y + half.y);
-        dl->AddRectFilled(min, max, with_alpha(rgba(28, 27, 38), confirm_anim), 22.0f * u);
-        dl->AddRect(min, max, with_alpha(rgba(255, 255, 255, 30), confirm_anim), 22.0f * u, 1.0f * u);
-        const std::string q = "Quit rsdk-air?";
-        const ImVec2 qs = measure(font_bold, 26.0f * u, q);
-        text(dl, font_bold, 26.0f * u, ImVec2(c.x - qs.x / 2, min.y + 28.0f * u),
-             with_alpha(IM_COL32_WHITE, confirm_anim), q);
+        dl->AddRectFilled(min, max, with_alpha(rgba(28, 27, 38), anim), 22.0f * u);
+        dl->AddRect(min, max, with_alpha(rgba(255, 255, 255, 30), anim), 22.0f * u, 1.0f * u);
+        const ImVec2 qs = measure(font_bold, 26.0f * u, question);
+        text(dl, font_bold, 26.0f * u, ImVec2(c.x - qs.x / 2, min.y + 28.0f * u), with_alpha(IM_COL32_WHITE, anim),
+             question);
         const char *labels[2] = {"No", "Yes"};
         for (int i = 0; i < 2; ++i) {
             const float bx = c.x + (i == 0 ? -1.0f : 1.0f) * 95.0f * u;
             const ImVec2 bmin(bx - 80.0f * u, max.y - 72.0f * u), bmax(bx + 80.0f * u, max.y - 26.0f * u);
-            const bool f = confirm_focus == i;
-            dl->AddRectFilled(bmin, bmax, with_alpha(f ? IM_COL32_WHITE : rgba(255, 255, 255, 26), confirm_anim),
-                              999.0f);
+            const bool f = yes_focused == i;
+            dl->AddRectFilled(bmin, bmax, with_alpha(f ? IM_COL32_WHITE : rgba(255, 255, 255, 26), anim), 999.0f);
             const ImVec2 ls = measure(font_bold, 18.0f * u, labels[i]);
             text(dl, font_bold, 18.0f * u, ImVec2(bx - ls.x / 2, (bmin.y + bmax.y - ls.y) / 2),
-                 with_alpha(f ? rgba(14, 13, 20) : rgba(225, 225, 235), confirm_anim), labels[i]);
+                 with_alpha(f ? rgba(14, 13, 20) : rgba(225, 225, 235), anim), labels[i]);
             rects[i * 2] = bmin;
             rects[i * 2 + 1] = bmax;
         }
@@ -802,6 +1056,10 @@ struct Picker::Impl {
         case SDLK_SPACE: return Action::Accept;
         case SDLK_ESCAPE:
         case SDLK_AC_BACK: return Action::Back;
+        case SDLK_DELETE:
+        case SDLK_BACKSPACE: return Action::More;
+        case SDLK_c:
+        case SDLK_F1: return Action::Credits;
         default: return Action::None;
         }
     }
@@ -817,6 +1075,8 @@ struct Picker::Impl {
         case SDL_CONTROLLER_BUTTON_START: return Action::Accept;
         case SDL_CONTROLLER_BUTTON_B:
         case SDL_CONTROLLER_BUTTON_BACK: return Action::Back;
+        case SDL_CONTROLLER_BUTTON_Y: return Action::More;
+        case SDL_CONTROLLER_BUTTON_X: return Action::Credits;
         default: return Action::None;
         }
     }
@@ -849,6 +1109,7 @@ struct Picker::Impl {
 };
 
 Picker::Picker() : impl_(std::make_unique<Impl>()) {}
+
 Picker::~Picker() = default;
 
 bool Picker::open(std::string &error)
@@ -858,7 +1119,9 @@ bool Picker::open(std::string &error)
 #if defined(__ANDROID__)
     // Fullscreen hides the status and navigation bars (immersive mode). Without it they
     // stay on screen over the picker: with targetSdk 35 the app draws edge to edge.
-    const Uint32 window_flags = SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_ALLOW_HIGHDPI;
+    // Resizable keeps every orientation: without it SDL locks the screen to the one the
+    // device had when the window was created (SDLActivity.setOrientationBis).
+    const Uint32 window_flags = SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
 #else
     const Uint32 window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
 #endif
@@ -954,6 +1217,23 @@ int Picker::choose(const std::vector<GameStatus> &games)
         auto act = [&](Action a) {
             if (a == Action::None)
                 return;
+            if (s.credits_open) {
+                const float step = 60.0f * s.ui();
+                if (a == Action::Up)
+                    s.credits_scroll = std::max(0.0f, s.credits_scroll - step);
+                else if (a == Action::Down)
+                    s.credits_scroll = std::min(s.credits_scroll_max, s.credits_scroll + step);
+                else if (a == Action::Back || a == Action::Accept || a == Action::Credits)
+                    s.credits_open = false;
+                return;
+            }
+            if (a == Action::Credits) {
+                if (!s.confirm_quit) {
+                    s.credits_open = true;
+                    s.credits_scroll = 0.0f;
+                }
+                return;
+            }
             if (s.confirm_quit) {
                 if (a == Action::Left || a == Action::Right)
                     s.confirm_focus = 1 - s.confirm_focus;
@@ -969,6 +1249,8 @@ int Picker::choose(const std::vector<GameStatus> &games)
             if (a == Action::Back) {
                 s.confirm_quit = true;
                 s.confirm_focus = 0;  // No
+            } else if (a == Action::More) {
+                // Nothing to delete on the covers.
             } else if (a == Action::Accept) {
                 const GameStatus &game = games[static_cast<std::size_t>(s.focus)];
                 if (game.available)
@@ -1010,11 +1292,34 @@ int Picker::choose(const std::vector<GameStatus> &games)
                 break;
             case SDL_MOUSEMOTION:
                 s.pointer_used = true;
+                if (s.credits_open && (event.motion.state & SDL_BUTTON_LMASK)) {  // drag to scroll (touch too)
+                    s.credits_scroll = std::clamp(s.credits_scroll - static_cast<float>(event.motion.yrel), 0.0f,
+                                                  s.credits_scroll_max);
+                    if (std::abs(event.motion.yrel) > 2)
+                        s.credits_dragged = true;
+                }
+                break;
+            case SDL_MOUSEWHEEL:
+                if (s.credits_open) {
+                    s.credits_scroll = std::clamp(s.credits_scroll - event.wheel.preciseY * 50.0f * s.ui(), 0.0f,
+                                                  s.credits_scroll_max);
+                }
                 break;
             case SDL_MOUSEBUTTONUP: {
                 if (event.button.button != SDL_BUTTON_LEFT)
                     break;
                 const ImVec2 p(static_cast<float>(event.button.x), static_cast<float>(event.button.y));
+                if (s.credits_open) {
+                    // A drag scrolls; only a tap on Close closes.
+                    if (!s.credits_dragged && hit(p, s.credits_close_min, s.credits_close_max))
+                        s.credits_open = false;
+                    s.credits_dragged = false;
+                    break;
+                }
+                if (!s.confirm_quit && hit(p, s.credits_pill_min, s.credits_pill_max)) {
+                    act(Action::Credits);
+                    break;
+                }
                 if (s.confirm_quit) {
                     if (hit(p, confirm_rects[0], confirm_rects[1]))
                         s.confirm_quit = false;
@@ -1028,8 +1333,12 @@ int Picker::choose(const std::vector<GameStatus> &games)
                 }
                 const int tile = s.tile_at(p, count);
                 if (tile >= 0) {
+#if !defined(__ANDROID__)
+                    // Desktop: a click on the focused cover (or a double click) plays it.
+                    // Android: a tap only selects; the game starts from the Play button.
                     if (tile == s.focus || event.button.clicks >= 2)
                         act(Action::Accept);
+#endif
                     s.set_focus(tile, count);
                 }
                 break;
@@ -1042,7 +1351,7 @@ int Picker::choose(const std::vector<GameStatus> &games)
             return chosen;
 
         // Hover follows the mouse once it has moved (touch taps go through clicks above).
-        if (s.pointer_used && !s.confirm_quit) {
+        if (s.pointer_used && !s.confirm_quit && !s.credits_open) {
             int mx = 0, my = 0;
             SDL_GetMouseState(&mx, &my);
             const int tile = s.tile_at(ImVec2(static_cast<float>(mx), static_cast<float>(my)), count);
@@ -1080,6 +1389,7 @@ int Picker::choose(const std::vector<GameStatus> &games)
         s.draw_hints(dl, u, focused.available || installable(focused) || importable(focused) ||
                                    !get_app_url(focused).empty());
         s.draw_confirm(ImGui::GetForegroundDrawList(), u, dt, confirm_rects);
+        s.draw_credits(ImGui::GetForegroundDrawList(), u, dt);
         ImGui::Render();
 
         SDL_SetRenderDrawColor(s.renderer, 14, 13, 20, 255);
@@ -1088,7 +1398,8 @@ int Picker::choose(const std::vector<GameStatus> &games)
         SDL_RenderPresent(s.renderer);
 
         // Nothing moving: sleep until the next event instead of redrawing at full rate.
-        bool settled = s.backdrop_mix > 0.995f && std::abs(s.confirm_anim - (s.confirm_quit ? 1.0f : 0.0f)) < 0.005f;
+        bool settled = s.backdrop_mix > 0.995f && std::abs(s.confirm_anim - (s.confirm_quit ? 1.0f : 0.0f)) < 0.005f &&
+                       std::abs(s.credits_anim - (s.credits_open ? 1.0f : 0.0f)) < 0.005f;
         for (std::size_t i = 0; i < s.lift.size(); ++i)
             settled = settled && std::abs(s.lift[i] - (static_cast<int>(i) == s.focus ? 1.0f : 0.0f)) < 0.003f;
         if (settled && s.pads.empty())

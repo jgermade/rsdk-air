@@ -25,3 +25,18 @@ disc as close to the right edge as to the bottom, Sonic 3 keeps Robotnik.
 
 The play.germade covers were made by the project owner with an image generator (Gemini),
 in the style of the games; they are fan art, not SEGA's box art.
+
+## players/ and stages/
+
+The save-slot screen of Sonic 1 and 2 (`draw_slot_card()` in `src/launcher/picker.cpp`),
+which redraws rsdkv4-wasm's load-game screen (craft's slot cards).
+
+| Files | Source | Changes |
+| --- | --- | --- |
+| `players/{sonic,tails,knuckles,sonictails}.png` | rsdkv4-wasm `src/craft/assets/player-*.svg` (commit `a53c681`) | SVG rendered to 256 x 256 PNG with a transparent background (Chromium) |
+| `stages/sonic1/zone-1..7.png`, `stages/sonic1/special.png` | rsdkv4-wasm `src/craft/assets/stages-sonic1/` | none (140 x 80 PNG) |
+| `stages/sonic2/zone-1..10.png`, `stages/sonic2/special.png` | rsdkv4-wasm `src/craft/assets/stages-sonic2/` | none (140 x 80 PNG) |
+
+`zone-N.png` is the N-th zone of the game's regular stage list (the table in
+`src/core/saves_rsdkv4.cpp`); zones past the last file show the card's plain background.
+Missing files fall back to the character's name and an empty portrait.

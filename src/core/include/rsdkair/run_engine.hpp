@@ -2,6 +2,8 @@
 // Only ever called in a game process (`rsdk-air --game <id>`), never in the launcher.
 #pragma once
 
+#include <rsdkair/engine.h>
+
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -24,6 +26,7 @@ struct EngineRun {
     std::filesystem::path data_dir;
     std::filesystem::path save_dir;  // created if missing
     std::vector<std::string> extra_args;
+    const RsdkAirHost *host = nullptr;  // the in-game menu (src/launcher/overlay.cpp), or none
 };
 
 // Returns the engine's exit code, or one of ExitCode on failure (with error set).

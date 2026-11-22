@@ -37,6 +37,40 @@ rsdkair_patch_replace(userdata [=[
 #endif]=])
 rsdkair_patch_end(userdata RSDKV3_USERDATA_CPP)
 
+# The in-game menu (engines/common/menu_glue.hpp): every polled SDL event goes to the
+# menu first, and each frame calls it just before the swap.
+rsdkair_patch_begin(engine "${UP}/RSDKv3/RetroEngine.cpp")
+rsdkair_patch_replace(engine [=[#include "RetroEngine.hpp"]=]
+[=[#include "RetroEngine.hpp"
+
+int rsdkair_rsdkv3_menu_event(const void *event); // rsdk-air: rsdkv3_module.cpp
+void rsdkair_rsdkv3_menu_frame();]=])
+rsdkair_patch_replace(engine [=[    while (SDL_PollEvent(&Engine.sdlEvents)) {]=]
+[=[    while (SDL_PollEvent(&Engine.sdlEvents)) {
+        if (rsdkair_rsdkv3_menu_event(&Engine.sdlEvents)) // rsdk-air: the in-game menu took it
+            continue;]=])
+rsdkair_patch_replace(engine [=[        SDL_GL_SwapWindow(Engine.window);]=]
+[=[        rsdkair_rsdkv3_menu_frame(); // rsdk-air: may open the in-game menu
+        SDL_GL_SwapWindow(Engine.window);]=])
+rsdkair_patch_end(engine RSDKV3_RETROENGINE_CPP)
+
+# On-screen controls (drawn by the in-game menu): their buttons count as held, like a key
+# or a pad button. The game's own touch controls go with its disableTouchControls flag.
+rsdkair_patch_begin(input "${UP}/RSDKv3/Input.cpp")
+rsdkair_patch_replace(input [=[#include "RetroEngine.hpp"]=]
+[=[#include "RetroEngine.hpp"
+
+bool rsdkair_rsdkv3_pad_held(int button); // rsdk-air: rsdkv3_module.cpp]=])
+rsdkair_patch_replace(input [=[            if (keyState[inputDevice[i].keyMappings]) {
+                inputDevice[i].setHeld();
+                if (!inputDevice[INPUT_ANY].hold)]=]
+[=[            if (keyState[inputDevice[i].keyMappings] || rsdkair_rsdkv3_pad_held(i)) { // rsdk-air
+                inputDevice[i].setHeld();
+                if (!inputDevice[INPUT_ANY].hold)]=])
+rsdkair_patch_replace(input [=[            if (getControllerButton(inputDevice[i].contMappings)) {]=]
+[=[            if (getControllerButton(inputDevice[i].contMappings) || rsdkair_rsdkv3_pad_held(i)) { // rsdk-air]=])
+rsdkair_patch_end(input RSDKV3_INPUT_CPP)
+
 set(RSDKV3_SOURCES
     ${UP}/dependencies/all/tinyxml2/tinyxml2.cpp
     ${UP}/dependencies/all/theoraplay/theoraplay.c
@@ -46,7 +80,7 @@ set(RSDKV3_SOURCES
     ${UP}/RSDKv3/Debug.cpp
     ${UP}/RSDKv3/Drawing.cpp
     ${UP}/RSDKv3/Ini.cpp
-    ${UP}/RSDKv3/Input.cpp
+    ${RSDKV3_INPUT_CPP}
     ${UP}/RSDKv3/fcaseopen.c
     ${UP}/RSDKv3/Math.cpp
     ${UP}/RSDKv3/ModAPI.cpp
@@ -54,7 +88,7 @@ set(RSDKV3_SOURCES
     ${UP}/RSDKv3/Palette.cpp
     ${UP}/RSDKv3/Player.cpp
     ${UP}/RSDKv3/Reader.cpp
-    ${UP}/RSDKv3/RetroEngine.cpp
+    ${RSDKV3_RETROENGINE_CPP}
     ${UP}/RSDKv3/Scene.cpp
     ${UP}/RSDKv3/Scene3D.cpp
     ${UP}/RSDKv3/Script.cpp
@@ -73,6 +107,7 @@ rsdkair_engine_module(rsdkv3
 set_target_properties(rsdkv3 PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 
 target_include_directories(rsdkv3 PRIVATE
+    "${PROJECT_SOURCE_DIR}/engines/common"
     "${UP}/RSDKv3"
     "${UP}/dependencies/all/theoraplay"
     "${UP}/dependencies/all/tinyxml2")
