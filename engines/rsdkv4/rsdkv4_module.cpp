@@ -215,6 +215,7 @@ bool supported(const char *id)
 // Called from the patched RetroEngine.cpp (engines/rsdkv4/CMakeLists.txt).
 int rsdkair_rsdkv4_menu_event(const void *event) { return g_menu.event(event); }
 void rsdkair_rsdkv4_menu_frame() { g_menu.frame(Engine.window); }
+void rsdkair_rsdkv4_menu_open() { g_menu.open(); }
 
 // Where InitUserdata puts gamePath on macOS and Android (patched Userdata.cpp).
 const char *rsdkair_rsdkv4_game_path() { return g_game_path.c_str(); }

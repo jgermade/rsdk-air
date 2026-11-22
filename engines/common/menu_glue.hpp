@@ -32,6 +32,13 @@ struct Glue {
         return host && attached && host->event ? host->event(host->ctx, sdl_event) : 0;
     }
 
+    // The game's own pause (button, key): open this menu instead.
+    void open() const
+    {
+        if (host && attached && host->open)
+            host->open(host->ctx);
+    }
+
     void frame(void *window)
     {
         if (!host)

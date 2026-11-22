@@ -602,6 +602,7 @@ struct GameMenu::Impl {
             return static_cast<Impl *>(ctx)->event(*static_cast<const SDL_Event *>(e)) ? 1 : 0;
         };
         hooks.frame = [](void *ctx) { static_cast<Impl *>(ctx)->frame(); };
+        hooks.open = [](void *ctx) { static_cast<Impl *>(ctx)->open_requested = true; };
     }
 
     ~Impl() { teardown(); }

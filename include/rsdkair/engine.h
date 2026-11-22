@@ -101,6 +101,9 @@ typedef struct RsdkAirHost {
     /* After the engine drew a frame, just before it presents it. Opens the menu
      * (blocking) when the player asked for it. */
     void (*frame)(void *ctx);
+    /* The game asked to pause (its own pause button or key): the menu opens at the next
+     * frame hook, instead of the game's own pause menu. */
+    void (*open)(void *ctx);
 } RsdkAirHost;
 
 /* What the launcher passes to rsdkair_engine_main. All strings are UTF-8. */

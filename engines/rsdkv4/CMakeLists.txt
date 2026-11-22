@@ -58,6 +58,26 @@ rsdkair_patch_replace(engine [=[                SDL_GL_SwapWindow(Engine.window)
                 SDL_GL_SwapWindow(Engine.window);]=])
 rsdkair_patch_end(engine RSDKV4_RETROENGINE_CPP)
 
+# The game's own pause (the touch pause button, Start, losing focus) sets ENGINE_INITPAUSE,
+# which RetroGameLoop answers with the native vertical pause menu. It opens the in-game
+# menu instead; the last frame is drawn again so the menu has it as its backdrop.
+rsdkair_patch_begin(gameloop "${UP}/RSDKv4/NativeObjects/RetroGameLoop.cpp")
+rsdkair_patch_replace(gameloop [=[#include "RetroEngine.hpp"]=]
+[=[#include "RetroEngine.hpp"
+
+void rsdkair_rsdkv4_menu_open(); // rsdk-air: rsdkv4_module.cpp]=])
+rsdkair_patch_replace(gameloop [=[        case ENGINE_INITPAUSE:
+            mixFiltersOnJekyll = false;
+            InitPauseMenu();
+            break;]=]
+[=[        case ENGINE_INITPAUSE: // rsdk-air: the in-game menu, not the native pause menu
+            Engine.gameMode = ENGINE_MAINGAME;
+            TransferRetroBuffer();
+            RenderRetroBuffer(64, 160.0);
+            rsdkair_rsdkv4_menu_open();
+            break;]=])
+rsdkair_patch_end(gameloop RSDKV4_RETROGAMELOOP_CPP)
+
 set(RSDKV4_SOURCES
     ${UP}/dependencies/all/tinyxml2/tinyxml2.cpp
     ${UP}/RSDKv4/Animation.cpp
@@ -94,6 +114,7 @@ foreach(object
         VirtualDPadM ZoneButton)
     list(APPEND RSDKV4_SOURCES "${UP}/RSDKv4/NativeObjects/${object}.cpp")
 endforeach()
+list(TRANSFORM RSDKV4_SOURCES REPLACE ".*/NativeObjects/RetroGameLoop\\.cpp$" "${RSDKV4_RETROGAMELOOP_CPP}")
 
 rsdkair_engine_module(rsdkv4
     rsdkv4_module.cpp
