@@ -453,7 +453,7 @@ struct Picker::Impl {
     };
 
     static constexpr float kCaption = 52.0f;
-    static constexpr float kCaptionPortrait = 34.0f;  // title without the year
+    static constexpr float kCaptionPortrait = 0.0f;  // no title or year: the panel names the game
     static constexpr float kCoverAspect = 1.25f;  // height / width: 4:5, a little taller than wide, like a box  // title + year under a cover, at u = 1
 
     // Scale of the whole layout: 1.0 at 1280x720, or at 720x1280 when upright, so a phone
@@ -803,7 +803,9 @@ struct Picker::Impl {
                         with_alpha(IM_COL32_WHITE, 0.4f + 0.6f * lf), round + ring, 3.0f * u);
         }
 
-        // Title and year under the cover.
+        // Title and year under the cover (landscape; upright the details panel names it).
+        if (l.portrait)
+            return;
         const float ty = l.max[index].y + 12.0f * u + grow;
         const std::string title(game.spec->title);
         const float title_w = measure(font_bold, 15.0f * u, title).x;
@@ -811,9 +813,8 @@ struct Picker::Impl {
         const float title_size = title_w > tile_w ? 15.0f * u * tile_w / title_w : 15.0f * u;  // narrow tiles
         text(dl, focused ? font_bold : font_regular, title_size, ImVec2(l.min[index].x + 2.0f * u, ty),
              focused ? IM_COL32_WHITE : rgba(196, 196, 208), title);
-        if (!l.portrait)  // upright the covers come first; the year is in the panel anyway
-            text(dl, font_regular, 12.5f * u, ImVec2(l.min[index].x + 2.0f * u, ty + 20.0f * u), rgba(140, 140, 155),
-                 std::to_string(game.spec->year));
+        text(dl, font_regular, 12.5f * u, ImVec2(l.min[index].x + 2.0f * u, ty + 20.0f * u), rgba(140, 140, 155),
+             std::to_string(game.spec->year));
     }
 
     std::string status_line(const GameStatus &game, std::string &chip, ImU32 &chip_col) const
