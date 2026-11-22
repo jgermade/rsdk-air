@@ -459,7 +459,9 @@ struct Picker::Impl {
     float ui() const
     {
         const ImVec2 size = safe_size();
-        const float scale = size.y > size.x ? std::min(size.x / 720.0f, size.y / 1280.0f)
+        // Upright: a 600x1150 reference, so a phone's header, panel and hints are as easy
+        // to read as in landscape (720x1280 came out small on phones).
+        const float scale = size.y > size.x ? std::min(size.x / 600.0f, size.y / 1150.0f)
                                             : std::min(size.x / 1280.0f, size.y / 720.0f);
         return std::clamp(scale, 0.5f, 2.5f);
     }
