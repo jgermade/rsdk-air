@@ -449,9 +449,11 @@ struct Picker::Impl {
         float tile_h = 0.0f;  // cover height (kCoverAspect taller)
         std::vector<ImVec2> min, max;  // cover rectangle per game
         ImVec2 panel_min, panel_max;   // area for the details panel
+        bool portrait = false;         // covers closer, no year under them
     };
 
     static constexpr float kCaption = 52.0f;
+    static constexpr float kCaptionPortrait = 34.0f;  // title without the year
     static constexpr float kCoverAspect = 1.25f;  // height / width: 4:5, a little taller than wide, like a box  // title + year under a cover, at u = 1
 
     // Scale of the whole layout: 1.0 at 1280x720, or at 720x1280 when upright, so a phone
@@ -479,7 +481,7 @@ struct Picker::Impl {
         const float width = size.x - 2 * margin;
         auto tile_for = [&](int c) { return (width - static_cast<float>(c - 1) * gap) / static_cast<float>(c); };
         if (size.y > size.x)
-            return layout_portrait(l, count, origin, size, top, gap, margin, tile_for(2));
+            return layout_portrait(l, count, origin, size, top, 20.0f * u, margin, tile_for(2));
         int cols = std::max(1, count);
         while (cols > 1 && tile_for(cols) < 130.0f * u)
             --cols;
@@ -511,13 +513,15 @@ struct Picker::Impl {
                            float max_tile) const
     {
         const float u = l.u;
-        const float cap = kCaption * u;
+        l.portrait = true;
+        const float cap = kCaptionPortrait * u;  // the title only
         const float width = size.x - 2 * margin;
         const int full_rows = count / 2;
         const bool wide_last = count % 2 == 1;
         constexpr float kWide = 9.0f / 16.0f;  // height / width of the wide cover
-        // Covers a little narrower than the width allows, for air at the sides.
-        max_tile *= 0.86f;
+        // Covers as wide as the width allows (the margin keeps air at the sides), closer
+        // together than in landscape: gap is smaller here.
+        max_tile = (size.x - 2 * margin - gap) / 2;
         // Height used: full_rows * (tile + cap + gap) + [ (2 tile + gap) * kWide + cap ].
         // Below them: the details panel (title on two lines, status, engine credit) and
         // the hints, about 300 at scale 1.
@@ -603,7 +607,8 @@ struct Picker::Impl {
     {
         const Layout l = layout(count);
         for (int i = 0; i < count; ++i) {  // the cover and its caption
-            if (p.x >= l.min[i].x && p.x < l.max[i].x && p.y >= l.min[i].y && p.y < l.max[i].y + kCaption * l.u)
+            const float cap = (l.portrait ? kCaptionPortrait : kCaption) * l.u;
+            if (p.x >= l.min[i].x && p.x < l.max[i].x && p.y >= l.min[i].y && p.y < l.max[i].y + cap)
                 return i;
         }
         return -1;
@@ -806,8 +811,9 @@ struct Picker::Impl {
         const float title_size = title_w > tile_w ? 15.0f * u * tile_w / title_w : 15.0f * u;  // narrow tiles
         text(dl, focused ? font_bold : font_regular, title_size, ImVec2(l.min[index].x + 2.0f * u, ty),
              focused ? IM_COL32_WHITE : rgba(196, 196, 208), title);
-        text(dl, font_regular, 12.5f * u, ImVec2(l.min[index].x + 2.0f * u, ty + 20.0f * u), rgba(140, 140, 155),
-             std::to_string(game.spec->year));
+        if (!l.portrait)  // upright the covers come first; the year is in the panel anyway
+            text(dl, font_regular, 12.5f * u, ImVec2(l.min[index].x + 2.0f * u, ty + 20.0f * u), rgba(140, 140, 155),
+                 std::to_string(game.spec->year));
     }
 
     std::string status_line(const GameStatus &game, std::string &chip, ImU32 &chip_col) const
