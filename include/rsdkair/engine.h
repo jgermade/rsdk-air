@@ -60,6 +60,13 @@ typedef struct RsdkAirSetting {
 #define RSDKAIR_SLOTS_NONE 0
 #define RSDKAIR_SLOTS_RSDKV4 1 /* saveRAM ints, 8 per slot (src/core saves_rsdkv4) */
 
+/* Buttons of the on-screen controls (RsdkAirEngineControl::set_pad). */
+#define RSDKAIR_PAD_UP 0x01
+#define RSDKAIR_PAD_DOWN 0x02
+#define RSDKAIR_PAD_LEFT 0x04
+#define RSDKAIR_PAD_RIGHT 0x08
+#define RSDKAIR_PAD_A 0x10 /* jump */
+
 /* What the module offers the menu. Any function may be NULL when unsupported. */
 typedef struct RsdkAirEngineControl {
     void *window;   /* SDL_Window* */
@@ -86,6 +93,12 @@ typedef struct RsdkAirEngineControl {
     int (*read_save_ram)(int *out, int count); /* copies the engine's live save data */
     void (*start_slot)(int slot, int player);  /* slot -1 = no save; continues a saved slot */
     void (*delete_slot)(int slot);
+
+    /* On-screen controls, drawn by the host over the game. set_pad: the buttons held now
+     * (RSDKAIR_PAD_*), given every frame; the engine reads them like a pad's buttons.
+     * hide_touch_controls: 1 hides the game's own touch controls, 0 shows them again. */
+    void (*set_pad)(unsigned buttons);
+    void (*hide_touch_controls)(int hide);
 } RsdkAirEngineControl;
 
 /* The host's hooks, given to the module. ctx goes back as the first argument. */

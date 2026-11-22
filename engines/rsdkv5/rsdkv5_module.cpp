@@ -51,6 +51,7 @@ std::string g_user_dir;
 // engine loaded the game (its scene list), not over the mod loading screen.
 
 rsdkair_menu::Glue g_menu;
+unsigned g_pad = 0;  // on-screen controls held (RSDKAIR_PAD_*)
 bool g_started = false;
 std::filesystem::path g_rsdkair_ini;  // <save>/rsdk-air.ini: settings the engine has no key for
 int g_smooth = 0;
@@ -161,6 +162,8 @@ void setup_menu(const RsdkAirHost *host)
     c.setting_count = [] { return kSettingCount; };
     c.setting_get = setting_get;
     c.setting_set = setting_set;
+    c.set_pad = [](unsigned buttons) { g_pad = buttons; };
+    c.hide_touch_controls = [](int) {};  // Mania has no touch controls of its own
 }
 
 bool supported(const char *id)
@@ -173,6 +176,27 @@ bool supported(const char *id)
 }
 
 } // namespace
+
+// Called from the patched Input.cpp: the on-screen controls' buttons, as raw "held"
+// states for player 1 and "any" (the engine then sets down/press as for a pad).
+void rsdkair_rsdkv5_apply_pad()
+{
+    if (!g_pad)
+        return;
+    for (int c : {static_cast<int>(RSDK::CONT_ANY), static_cast<int>(RSDK::CONT_P1)}) {
+        RSDK::ControllerState &s = RSDK::controller[c];
+        if (g_pad & RSDKAIR_PAD_UP)
+            s.keyUp.press = true;
+        if (g_pad & RSDKAIR_PAD_DOWN)
+            s.keyDown.press = true;
+        if (g_pad & RSDKAIR_PAD_LEFT)
+            s.keyLeft.press = true;
+        if (g_pad & RSDKAIR_PAD_RIGHT)
+            s.keyRight.press = true;
+        if (g_pad & RSDKAIR_PAD_A)
+            s.keyA.press = true;
+    }
+}
 
 // Called from the patched SDL2RenderDevice.cpp (engines/rsdkv5/CMakeLists.txt).
 int rsdkair_rsdkv5_menu_event(const void *event) { return g_menu.event(event); }

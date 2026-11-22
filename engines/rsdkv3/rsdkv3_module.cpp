@@ -39,6 +39,7 @@ const RsdkAirGameInfo *const kGames[] = {&kSonicCD, nullptr};
 // settings, back to the launcher.
 
 rsdkair_menu::Glue g_menu;
+unsigned g_pad = 0;  // on-screen controls held (RSDKAIR_PAD_*)
 
 struct Screen {
     int list;
@@ -146,6 +147,8 @@ void setup_menu(const RsdkAirHost *host)
     c.setting_count = [] { return kSettingCount; };
     c.setting_get = setting_get;
     c.setting_set = setting_set;
+    c.set_pad = [](unsigned buttons) { g_pad = buttons; };
+    c.hide_touch_controls = [](int hide) { disableTouchControls = hide != 0; };
 }
 
 // Size of Engine.dataFile in RetroEngine.hpp, terminator included.
@@ -170,6 +173,9 @@ const char *rsdkair_rsdkv3_game_path() { return g_game_path.c_str(); }
 // Called from the patched RetroEngine.cpp (engines/rsdkv3/CMakeLists.txt).
 int rsdkair_rsdkv3_menu_event(const void *event) { return g_menu.event(event); }
 void rsdkair_rsdkv3_menu_frame() { g_menu.frame(Engine.window); }
+
+// On-screen controls (patched Input.cpp): input buttons 0-4 are up, down, left, right, A.
+bool rsdkair_rsdkv3_pad_held(int button) { return button >= 0 && button <= 4 && (g_pad & (1u << button)) != 0; }
 
 #if RETRO_PLATFORM == RETRO_OSX
 // Upstream implements this in dependencies/mac/cocoaHelpers.mm (the app bundle's resources);

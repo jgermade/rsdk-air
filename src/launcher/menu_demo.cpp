@@ -77,6 +77,9 @@ int main(int argc, char **argv)
     std::memcpy(&g_ram[0], s1, sizeof(s1));
     std::memcpy(&g_ram[16], s3, sizeof(s3));
 
+    // Mouse clicks also arrive as touches, to try the on-screen controls on a desktop
+    // (enable them in menu_demo.ini: [Touch] Enabled=true).
+    SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "1");
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER);
     if (gl) {
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 1);
@@ -101,7 +104,7 @@ int main(int argc, char **argv)
         screen = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB565, SDL_TEXTUREACCESS_STREAMING, 424, 240);
     }
 
-    rsdkair::GameMenu menu("sonic2", "Sonic the Hedgehog 2");
+    rsdkair::GameMenu menu("sonic2", "Sonic the Hedgehog 2", "menu_demo.ini");
     const RsdkAirHost *host = menu.host();
     RsdkAirEngineControl control{};
     control.window = window;
@@ -115,6 +118,14 @@ int main(int argc, char **argv)
     control.setting_count = setting_count;
     control.setting_get = setting_get;
     control.setting_set = setting_set;
+    control.set_pad = [](unsigned b) {
+        static unsigned last = 0;
+        if (b != last)
+            std::printf("pad %02x\n", b);
+        last = b;
+        std::fflush(stdout);
+    };
+    control.hide_touch_controls = [](int hide) { std::printf("hide game touch controls %d\n", hide); };
     if (slots) {
         control.slots_kind = RSDKAIR_SLOTS_RSDKV4;
         control.read_save_ram = read_save_ram;

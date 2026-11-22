@@ -1,5 +1,6 @@
 #include "game_menu.hpp"
 
+#include <rsdkair/ini.hpp>
 #include <rsdkair/saves_rsdkv4.hpp>
 
 #include <SDL.h>
@@ -21,6 +22,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <string>
@@ -538,6 +542,7 @@ bool hit(ImVec2 p, ImVec2 min, ImVec2 max)
 
 struct GameMenu::Impl {
     std::string game_id, title;
+    std::filesystem::path settings_file;  // <save>/rsdk-air.ini: the menu's own settings
     RsdkAirHost hooks{};
     const RsdkAirEngineControl *control = nullptr;
     void *attached_window = nullptr, *attached_renderer = nullptr;
@@ -592,8 +597,33 @@ struct GameMenu::Impl {
     std::vector<Row> rows;  // settings rows; the last is Back
     ImVec2 dialog_rects[4];
 
-    Impl(std::string id, std::string name) : game_id(std::move(id)), title(std::move(name))
+    // ---- On-screen controls ----
+    // A d-pad (bottom left), a jump button (bottom right) and a pause button (top right),
+    // drawn over the game every frame; their buttons go to the engine (set_pad) like a
+    // pad's. Touches that start on them are theirs; the rest still reach the game (its
+    // touch menus). A key or pad press hides them until the screen is touched again.
+    bool touch_supported = false;
+    bool touch_enabled = false;  // the "On-screen controls" setting
+    int touch_size = 1;          // 0 small, 1 medium, 2 large
+    int touch_opacity = 60;      // percent
+    bool pad_mode = false;       // a key or pad is in use: controls hidden
+    enum class Role { Pad, Jump, Pause };
+    struct Finger {
+        SDL_FingerID id;
+        Role role;
+        ImVec2 pos;
+        bool inside = true;  // pause: still on the button
+    };
+    std::vector<Finger> fingers;
+    unsigned pad_buttons = 0;
+
+    Impl(std::string id, std::string name, std::filesystem::path settings)
+        : game_id(std::move(id)), title(std::move(name)), settings_file(std::move(settings))
     {
+#if defined(__ANDROID__)
+        touch_supported = true;
+#endif
+        load_settings();
         hooks.ctx = this;
         hooks.attach = [](void *ctx, const RsdkAirEngineControl *c, int starting) {
             static_cast<Impl *>(ctx)->attach(c, starting != 0);
@@ -667,6 +697,9 @@ struct GameMenu::Impl {
         }
         // The back button opens the menu instead of leaving the game.
         SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+        if (SDL_GetNumTouchDevices() > 0)
+            touch_supported = true;
+        apply_touch();
         if (start)
             run(true);
     }
@@ -675,6 +708,8 @@ struct GameMenu::Impl {
     {
         if (!renderer)
             return false;
+        if (touch_event(e))
+            return true;
         switch (e.type) {
         case SDL_KEYDOWN:
             if (!e.key.repeat && (e.key.keysym.sym == SDLK_ESCAPE || e.key.keysym.sym == SDLK_AC_BACK)) {
@@ -704,9 +739,296 @@ struct GameMenu::Impl {
 
     void frame()
     {
-        if (open_requested && renderer) {
+        if (!renderer)
+            return;
+        if (open_requested) {
             open_requested = false;
+            release_pad();
             run(false);
+            return;
+        }
+        update_pad();
+        if (touch_visible())
+            draw_overlay();
+    }
+
+    // ---- on-screen controls ----
+
+    bool touch_visible() const { return touch_supported && touch_enabled && !pad_mode && control; }
+
+    void apply_touch()
+    {
+        if (control && control->hide_touch_controls)
+            control->hide_touch_controls(touch_supported && touch_enabled ? 1 : 0);
+        if (!touch_enabled)
+            release_pad();
+    }
+
+    void release_pad()
+    {
+        fingers.clear();
+        pad_buttons = 0;
+        if (control && control->set_pad)
+            control->set_pad(0);
+    }
+
+    void load_settings()
+    {
+#if defined(__ANDROID__)
+        touch_enabled = true;
+#endif
+        std::ifstream in(settings_file);
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        const std::string enabled = ini_get(text, "Touch", "Enabled");
+        if (!enabled.empty())
+            touch_enabled = enabled == "true";
+        const std::string size = ini_get(text, "Touch", "Size");
+        if (!size.empty())
+            touch_size = std::clamp(std::atoi(size.c_str()), 0, 2);
+        const std::string opacity = ini_get(text, "Touch", "Opacity");
+        if (!opacity.empty())
+            touch_opacity = std::clamp(std::atoi(opacity.c_str()), 20, 100);
+    }
+
+    void save_setting(const char *key, const std::string &value)
+    {
+        if (!settings_file.empty())
+            ini_set_file(settings_file, "Touch", key, value);
+    }
+
+    struct ControlsLayout {
+        ImVec2 pad;
+        float pad_r;
+        ImVec2 jump;
+        float jump_r;
+        ImVec2 pause;
+        float pause_r;
+    };
+
+    ImVec2 window_size() const
+    {
+        int w = 0, h = 0;
+        SDL_GetWindowSize(static_cast<SDL_Window *>(control->window), &w, &h);
+        return ImVec2(static_cast<float>(w), static_cast<float>(h));
+    }
+
+    ControlsLayout controls_layout() const
+    {
+        const ImVec2 s = window_size();
+        const float u = std::clamp(std::min(s.x, s.y) / 720.0f, 0.5f, 3.0f);
+        const float k = touch_size == 0 ? 0.8f : touch_size == 2 ? 1.25f : 1.0f;
+        const float margin = 44.0f * u;
+        ControlsLayout l;
+        l.pad_r = 96.0f * u * k;
+        l.pad = ImVec2(margin + l.pad_r, s.y - margin - l.pad_r);
+        l.jump_r = 62.0f * u * k;
+        l.jump = ImVec2(s.x - margin - l.jump_r, s.y - margin - l.jump_r);
+        l.pause_r = 26.0f * u * k;
+        l.pause = ImVec2(s.x - 30.0f * u - l.pause_r, 30.0f * u + l.pause_r);
+        return l;
+    }
+
+    static float dist(ImVec2 a, ImVec2 b) { return std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)); }
+
+    // Finger events on the controls are the menu's; the rest go on to the game.
+    bool touch_event(const SDL_Event &e)
+    {
+        if (!touch_supported || !touch_enabled || !control || !control->window)
+            return false;
+        switch (e.type) {
+        case SDL_KEYDOWN:
+            if (e.key.keysym.sym != SDLK_AC_BACK)
+                pad_mode = true;  // a keyboard: hide the controls
+            return false;
+        case SDL_CONTROLLERBUTTONDOWN: pad_mode = true; return false;
+        case SDL_MOUSEBUTTONDOWN:
+        case SDL_MOUSEBUTTONUP:
+        case SDL_MOUSEMOTION:
+            // SDL's mouse copy of a touch on the controls is not the game's either.
+            return e.button.which == SDL_TOUCH_MOUSEID && !fingers.empty();
+        case SDL_FINGERDOWN: {
+            pad_mode = false;
+            const ImVec2 s = window_size();
+            const ImVec2 p(e.tfinger.x * s.x, e.tfinger.y * s.y);
+            const ControlsLayout l = controls_layout();
+            Role role;
+            if (dist(p, l.pause) < l.pause_r * 1.8f)
+                role = Role::Pause;
+            else if (dist(p, l.pad) < l.pad_r * 1.5f)
+                role = Role::Pad;
+            else if (dist(p, l.jump) < l.jump_r * 1.7f)
+                role = Role::Jump;
+            else
+                return false;  // not ours: the game's (its menus)
+            fingers.push_back({e.tfinger.fingerId, role, p, true});
+            return true;
+        }
+        case SDL_FINGERMOTION:
+        case SDL_FINGERUP: {
+            auto it = std::find_if(fingers.begin(), fingers.end(),
+                                   [&](const Finger &f) { return f.id == e.tfinger.fingerId; });
+            if (it == fingers.end())
+                return false;
+            const ImVec2 s = window_size();
+            it->pos = ImVec2(e.tfinger.x * s.x, e.tfinger.y * s.y);
+            if (it->role == Role::Pause) {
+                const ControlsLayout l = controls_layout();
+                it->inside = dist(it->pos, l.pause) < l.pause_r * 1.8f;
+            }
+            if (e.type == SDL_FINGERUP) {
+                if (it->role == Role::Pause && it->inside)
+                    open_requested = true;  // opens at this frame's hook
+                fingers.erase(it);
+            }
+            return true;
+        }
+        default: return false;
+        }
+    }
+
+    // The buttons the fingers hold: the d-pad by direction (eight ways), the jump button.
+    void update_pad()
+    {
+        unsigned buttons = 0;
+        if (touch_visible()) {
+            const ControlsLayout l = controls_layout();
+            for (const Finger &f : fingers) {
+                if (f.role == Role::Jump) {
+                    buttons |= RSDKAIR_PAD_A;
+                } else if (f.role == Role::Pad) {
+                    const float dx = f.pos.x - l.pad.x, dy = f.pos.y - l.pad.y;
+                    if (std::sqrt(dx * dx + dy * dy) < l.pad_r * 0.22f)
+                        continue;  // dead zone in the middle
+                    const float angle = std::atan2(-dy, dx);  // 0 right, pi/2 up
+                    const int sector = static_cast<int>(std::floor((angle + kPi / 8.0f) / (kPi / 4.0f))) & 7;
+                    static constexpr unsigned kSectors[8] = {
+                        RSDKAIR_PAD_RIGHT, RSDKAIR_PAD_RIGHT | RSDKAIR_PAD_UP,   RSDKAIR_PAD_UP,
+                        RSDKAIR_PAD_UP | RSDKAIR_PAD_LEFT, RSDKAIR_PAD_LEFT, RSDKAIR_PAD_LEFT | RSDKAIR_PAD_DOWN,
+                        RSDKAIR_PAD_DOWN, RSDKAIR_PAD_DOWN | RSDKAIR_PAD_RIGHT};
+                    buttons |= kSectors[sector];
+                }
+            }
+        }
+        pad_buttons = buttons;
+        if (control->set_pad)
+            control->set_pad(buttons);
+    }
+
+    // One Dear ImGui frame with just the controls, over the frame the engine drew.
+    void draw_overlay()
+    {
+        ImGui::SetCurrentContext(imgui);
+        ImVec2 window, fb;
+        renderer->sizes(window, fb);
+        ImGuiIO &io = ImGui::GetIO();
+        io.DisplaySize = window;
+        io.DisplayFramebufferScale = ImVec2(window.x > 0 ? fb.x / window.x : 1.0f, window.y > 0 ? fb.y / window.y : 1.0f);
+        io.DeltaTime = 1.0f / 60.0f;
+        ImGui::NewFrame();
+        draw_controls(ImGui::GetBackgroundDrawList());
+        ImGui::Render();
+        renderer->render(ImGui::GetDrawData());
+        renderer->end();
+    }
+
+    void draw_controls(ImDrawList *dl)
+    {
+        const ControlsLayout l = controls_layout();
+        const float a = static_cast<float>(touch_opacity) / 100.0f;
+        auto col = [&](int r, int g, int b, int alpha) { return rgba(r, g, b, static_cast<int>(static_cast<float>(alpha) * a)); };
+        const ImU32 base = col(12, 14, 22, 150), ring = col(255, 255, 255, 120), ink = col(255, 255, 255, 230);
+
+        // D-pad: a disc with four arrows; the held directions light up.
+        dl->AddCircleFilled(l.pad, l.pad_r, base, 48);
+        dl->AddCircle(l.pad, l.pad_r, ring, 48, 2.0f);
+        struct Arrow {
+            unsigned bit;
+            float dx, dy;
+        };
+        constexpr Arrow kArrows[] = {{RSDKAIR_PAD_UP, 0, -1}, {RSDKAIR_PAD_DOWN, 0, 1}, {RSDKAIR_PAD_LEFT, -1, 0}, {RSDKAIR_PAD_RIGHT, 1, 0}};
+        for (const Arrow &ar : kArrows) {
+            const ImVec2 c(l.pad.x + ar.dx * l.pad_r * 0.62f, l.pad.y + ar.dy * l.pad_r * 0.62f);
+            const bool on = (pad_buttons & ar.bit) != 0;
+            if (on)
+                dl->AddCircleFilled(c, l.pad_r * 0.3f, col(255, 255, 255, 90), 24);
+            const float t = l.pad_r * 0.17f;
+            const ImVec2 tip(c.x + ar.dx * t, c.y + ar.dy * t);
+            const ImVec2 b1(c.x - ar.dx * t * 0.6f - ar.dy * t, c.y - ar.dy * t * 0.6f + ar.dx * t);
+            const ImVec2 b2(c.x - ar.dx * t * 0.6f + ar.dy * t, c.y - ar.dy * t * 0.6f - ar.dx * t);
+            dl->AddTriangleFilled(tip, b1, b2, on ? col(255, 255, 255, 255) : ink);
+        }
+        for (const Finger &f : fingers) {  // where the thumb is
+            if (f.role != Role::Pad)
+                continue;
+            ImVec2 d(f.pos.x - l.pad.x, f.pos.y - l.pad.y);
+            const float len = std::sqrt(d.x * d.x + d.y * d.y), max = l.pad_r * 0.75f;
+            if (len > max)
+                d = ImVec2(d.x * max / len, d.y * max / len);
+            dl->AddCircleFilled(ImVec2(l.pad.x + d.x, l.pad.y + d.y), l.pad_r * 0.2f, col(255, 255, 255, 60), 24);
+        }
+
+        // Jump.
+        const bool jump = (pad_buttons & RSDKAIR_PAD_A) != 0;
+        dl->AddCircleFilled(l.jump, l.jump_r, jump ? col(255, 255, 255, 170) : base, 40);
+        dl->AddCircle(l.jump, l.jump_r, ring, 40, 2.0f);
+        const float fs = l.jump_r * 0.8f;
+        const ImVec2 ts = measure(font_bold, fs, "A");
+        text(dl, font_bold, fs, ImVec2(l.jump.x - ts.x / 2, l.jump.y - ts.y / 2), jump ? col(12, 14, 22, 255) : ink, "A");
+
+        // Pause.
+        dl->AddCircleFilled(l.pause, l.pause_r, base, 32);
+        dl->AddCircle(l.pause, l.pause_r, ring, 32, 1.5f);
+        const float bw = l.pause_r * 0.22f, bh = l.pause_r * 0.8f;
+        dl->AddRectFilled(ImVec2(l.pause.x - bw * 2.0f, l.pause.y - bh / 2), ImVec2(l.pause.x - bw * 0.6f, l.pause.y + bh / 2), ink, 2.0f);
+        dl->AddRectFilled(ImVec2(l.pause.x + bw * 0.6f, l.pause.y - bh / 2), ImVec2(l.pause.x + bw * 2.0f, l.pause.y + bh / 2), ink, 2.0f);
+    }
+
+    // ---- settings: the engine's, then the menu's own (on-screen controls) ----
+
+    int engine_setting_count() const { return control && control->setting_count ? control->setting_count() : 0; }
+    int own_setting_count() const { return touch_supported ? 3 : 0; }
+    int setting_count() const { return engine_setting_count() + own_setting_count(); }
+
+    bool setting_get(int i, RsdkAirSetting &s) const
+    {
+        s = RsdkAirSetting{};
+        const int n = engine_setting_count();
+        if (i < n)
+            return control->setting_get && control->setting_get(i, &s);
+        static const char *const kOnOff[] = {"Off", "On", nullptr};
+        static const char *const kSizes[] = {"Small", "Medium", "Large", nullptr};
+        switch (i - n) {
+        case 0: s = {"On-screen controls", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kOnOff, touch_enabled ? 1 : 0}; return true;
+        case 1: s = {"Controls size", RSDKAIR_SETTING_CHOICE, 0, 0, 0, kSizes, touch_size}; return true;
+        case 2: s = {"Controls opacity", RSDKAIR_SETTING_RANGE, 20, 100, 20, nullptr, touch_opacity}; return true;
+        default: return false;
+        }
+    }
+
+    void setting_set(int i, int v)
+    {
+        const int n = engine_setting_count();
+        if (i < n) {
+            if (control->setting_set)
+                control->setting_set(i, v);
+            return;
+        }
+        switch (i - n) {
+        case 0:
+            touch_enabled = v != 0;
+            pad_mode = false;
+            save_setting("Enabled", touch_enabled ? "true" : "false");
+            apply_touch();
+            break;
+        case 1:
+            touch_size = std::clamp(v, 0, 2);
+            save_setting("Size", std::to_string(touch_size));
+            break;
+        case 2:
+            touch_opacity = std::clamp(v, 20, 100);
+            save_setting("Opacity", std::to_string(touch_opacity));
+            break;
+        default: break;
         }
     }
 
@@ -798,7 +1120,7 @@ struct GameMenu::Impl {
             if (name && *name)
                 items.push_back(item(Kind::Screen, i, name));
         }
-        if (control->setting_count && control->setting_count() > 0)
+        if (setting_count() > 0)
             items.push_back(item(Kind::Settings, 0, "Settings"));
         items.push_back(item(Kind::Exit, 0, "Back to the launcher"));
     }
@@ -1061,7 +1383,7 @@ struct GameMenu::Impl {
     void change_setting(int index, int dir)
     {
         RsdkAirSetting s{};
-        if (!control->setting_get || !control->setting_set || !control->setting_get(index, &s))
+        if (!setting_get(index, s))
             return;
         int value = s.value;
         if (s.kind == RSDKAIR_SETTING_RANGE) {
@@ -1075,7 +1397,7 @@ struct GameMenu::Impl {
             value = ((value + dir) % n + n) % n;
         }
         if (value != s.value)
-            control->setting_set(index, value);
+            setting_set(index, value);
     }
 
     void act(Action a)
@@ -1732,7 +2054,7 @@ struct GameMenu::Impl {
     void draw_settings(ImDrawList *dl, float u)
     {
         const ImVec2 size = ImGui::GetIO().DisplaySize;
-        const int count = control->setting_count ? control->setting_count() : 0;
+        const int count = setting_count();
         const float w = std::min(560.0f * u, size.x * 0.92f), pad = 26.0f * u;
         const float row_h = 52.0f * u, row_gap = 8.0f * u;
         const float h = pad + 40.0f * u + static_cast<float>(count + 1) * (row_h + row_gap) + pad;
@@ -1755,8 +2077,7 @@ struct GameMenu::Impl {
                 break;
             }
             RsdkAirSetting s{};
-            if (control->setting_get)
-                control->setting_get(i, &s);
+            setting_get(i, s);
             const std::string label = s.label ? s.label : "";
             const ImVec2 ls = measure(font_bold, 16.0f * u, label);
             text(dl, font_bold, 16.0f * u, ImVec2(r.min.x + 16.0f * u, y + (row_h - ls.y) / 2), fg, label);
@@ -1796,8 +2117,8 @@ struct GameMenu::Impl {
     }
 };
 
-GameMenu::GameMenu(std::string game_id, std::string title)
-    : impl_(std::make_unique<Impl>(std::move(game_id), std::move(title)))
+GameMenu::GameMenu(std::string game_id, std::string title, std::filesystem::path settings_file)
+    : impl_(std::make_unique<Impl>(std::move(game_id), std::move(title), std::move(settings_file)))
 {
 }
 

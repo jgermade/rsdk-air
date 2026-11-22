@@ -54,6 +54,23 @@ rsdkair_patch_replace(engine [=[        SDL_GL_SwapWindow(Engine.window);]=]
         SDL_GL_SwapWindow(Engine.window);]=])
 rsdkair_patch_end(engine RSDKV3_RETROENGINE_CPP)
 
+# On-screen controls (drawn by the in-game menu): their buttons count as held, like a key
+# or a pad button. The game's own touch controls go with its disableTouchControls flag.
+rsdkair_patch_begin(input "${UP}/RSDKv3/Input.cpp")
+rsdkair_patch_replace(input [=[#include "RetroEngine.hpp"]=]
+[=[#include "RetroEngine.hpp"
+
+bool rsdkair_rsdkv3_pad_held(int button); // rsdk-air: rsdkv3_module.cpp]=])
+rsdkair_patch_replace(input [=[            if (keyState[inputDevice[i].keyMappings]) {
+                inputDevice[i].setHeld();
+                if (!inputDevice[INPUT_ANY].hold)]=]
+[=[            if (keyState[inputDevice[i].keyMappings] || rsdkair_rsdkv3_pad_held(i)) { // rsdk-air
+                inputDevice[i].setHeld();
+                if (!inputDevice[INPUT_ANY].hold)]=])
+rsdkair_patch_replace(input [=[            if (getControllerButton(inputDevice[i].contMappings)) {]=]
+[=[            if (getControllerButton(inputDevice[i].contMappings) || rsdkair_rsdkv3_pad_held(i)) { // rsdk-air]=])
+rsdkair_patch_end(input RSDKV3_INPUT_CPP)
+
 set(RSDKV3_SOURCES
     ${UP}/dependencies/all/tinyxml2/tinyxml2.cpp
     ${UP}/dependencies/all/theoraplay/theoraplay.c
@@ -63,7 +80,7 @@ set(RSDKV3_SOURCES
     ${UP}/RSDKv3/Debug.cpp
     ${UP}/RSDKv3/Drawing.cpp
     ${UP}/RSDKv3/Ini.cpp
-    ${UP}/RSDKv3/Input.cpp
+    ${RSDKV3_INPUT_CPP}
     ${UP}/RSDKv3/fcaseopen.c
     ${UP}/RSDKv3/Math.cpp
     ${UP}/RSDKv3/ModAPI.cpp

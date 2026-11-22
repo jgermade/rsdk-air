@@ -81,6 +81,8 @@ StartArgs parse_args(int argc, char **argv)
 // ---- In-game menu (engines/common/menu_glue.hpp) ---------------------------------------
 
 rsdkair_menu::Glue g_menu;
+unsigned g_pad = 0;            // on-screen controls held (RSDKAIR_PAD_*)
+bool g_touch_hidden = false;   // our controls replace the game's VirtualDPad
 
 // The packs' own menu screens, by their name in the stage lists (rsdkv4-wasm's
 // PACK_SCREENS): {list, position, label}.
@@ -199,6 +201,8 @@ void setup_menu(const RsdkAirHost *host)
     };
     c.start_slot = [](int slot, int player) { rsdkv4_bridge::start_game(slot, player); };
     c.delete_slot = [](int slot) { rsdkv4_bridge::delete_save(slot); };
+    c.set_pad = [](unsigned buttons) { g_pad = buttons; };
+    c.hide_touch_controls = [](int hide) { g_touch_hidden = hide != 0; };
 }
 
 bool supported(const char *id)
@@ -216,6 +220,11 @@ bool supported(const char *id)
 int rsdkair_rsdkv4_menu_event(const void *event) { return g_menu.event(event); }
 void rsdkair_rsdkv4_menu_frame() { g_menu.frame(Engine.window); }
 void rsdkair_rsdkv4_menu_open() { g_menu.open(); }
+
+// On-screen controls (patched Input.cpp, VirtualDPad.cpp, VirtualDPadM.cpp). Input
+// buttons 0-4 are up, down, left, right, A: RSDKAIR_PAD_* bit by bit.
+bool rsdkair_rsdkv4_pad_held(int button) { return button >= 0 && button <= 4 && (g_pad & (1u << button)) != 0; }
+bool rsdkair_rsdkv4_touch_hidden() { return g_touch_hidden; }
 
 // Where InitUserdata puts gamePath on macOS and Android (patched Userdata.cpp).
 const char *rsdkair_rsdkv4_game_path() { return g_game_path.c_str(); }

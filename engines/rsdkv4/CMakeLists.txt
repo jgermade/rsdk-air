@@ -78,6 +78,34 @@ rsdkair_patch_replace(gameloop [=[        case ENGINE_INITPAUSE:
             break;]=])
 rsdkair_patch_end(gameloop RSDKV4_RETROGAMELOOP_CPP)
 
+# On-screen controls (drawn by the in-game menu): their buttons count as held, like a
+# key or a pad button, and the game's own touch pad (VirtualDPad, VirtualDPadM for
+# multiplayer) is not drawn while they are on.
+rsdkair_patch_begin(input "${UP}/RSDKv4/Input.cpp")
+rsdkair_patch_replace(input [=[#include "RetroEngine.hpp"]=]
+[=[#include "RetroEngine.hpp"
+
+bool rsdkair_rsdkv4_pad_held(int button); // rsdk-air: rsdkv4_module.cpp]=])
+rsdkair_patch_replace(input [=[            if (keyState[inputDevice[i].keyMappings]) {
+                inputDevice[i].setHeld();
+                if (!inputDevice[INPUT_ANY].hold)]=]
+[=[            if (keyState[inputDevice[i].keyMappings] || rsdkair_rsdkv4_pad_held(i)) { // rsdk-air
+                inputDevice[i].setHeld();
+                if (!inputDevice[INPUT_ANY].hold)]=])
+rsdkair_patch_replace(input [=[            if (getControllerButton(inputDevice[i].contMappings)) {]=]
+[=[            if (getControllerButton(inputDevice[i].contMappings) || rsdkair_rsdkv4_pad_held(i)) { // rsdk-air]=])
+rsdkair_patch_end(input RSDKV4_INPUT_CPP)
+foreach(pad VirtualDPad VirtualDPadM)
+    rsdkair_patch_begin(${pad} "${UP}/RSDKv4/NativeObjects/${pad}.cpp")
+    rsdkair_patch_replace(${pad} [=[#include "RetroEngine.hpp"]=]
+[=[#include "RetroEngine.hpp"
+
+bool rsdkair_rsdkv4_touch_hidden(); // rsdk-air: rsdkv4_module.cpp]=])
+    rsdkair_patch_replace(${pad} "void ${pad}_Main(void *objPtr)\n{\n    RSDK_THIS(${pad});\n"
+"void ${pad}_Main(void *objPtr)\n{\n    RSDK_THIS(${pad});\n    if (rsdkair_rsdkv4_touch_hidden()) // rsdk-air: our on-screen controls instead\n        return;\n")
+    rsdkair_patch_end(${pad} RSDKV4_${pad}_CPP)
+endforeach()
+
 set(RSDKV4_SOURCES
     ${UP}/dependencies/all/tinyxml2/tinyxml2.cpp
     ${UP}/RSDKv4/Animation.cpp
@@ -115,6 +143,9 @@ foreach(object
     list(APPEND RSDKV4_SOURCES "${UP}/RSDKv4/NativeObjects/${object}.cpp")
 endforeach()
 list(TRANSFORM RSDKV4_SOURCES REPLACE ".*/NativeObjects/RetroGameLoop\\.cpp$" "${RSDKV4_RETROGAMELOOP_CPP}")
+list(TRANSFORM RSDKV4_SOURCES REPLACE ".*/NativeObjects/VirtualDPad\\.cpp$" "${RSDKV4_VirtualDPad_CPP}")
+list(TRANSFORM RSDKV4_SOURCES REPLACE ".*/NativeObjects/VirtualDPadM\\.cpp$" "${RSDKV4_VirtualDPadM_CPP}")
+list(TRANSFORM RSDKV4_SOURCES REPLACE ".*/RSDKv4/Input\\.cpp$" "${RSDKV4_INPUT_CPP}")
 
 rsdkair_engine_module(rsdkv4
     rsdkv4_module.cpp

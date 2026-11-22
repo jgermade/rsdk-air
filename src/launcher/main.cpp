@@ -162,7 +162,7 @@ int run_game(const Options &options, const fs::path &root)
 #endif
 
     // The in-game menu (start screen and pause menu), drawn over the engine's window.
-    GameMenu menu(std::string(game->id), std::string(game->title));
+    GameMenu menu(std::string(game->id), std::string(game->title), status.save_dir / "rsdk-air.ini");
 
     EngineRun run;
     run.module = module_path(game->module);

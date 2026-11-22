@@ -19,6 +19,7 @@
 
 #include <rsdkair/engine.h>
 
+#include <filesystem>
 #include <memory>
 #include <string>
 
@@ -27,8 +28,9 @@ namespace rsdkair {
 class GameMenu {
 public:
     // game_id and title as in the catalog (art/covers/<game_id>.jpg is the backdrop
-    // before the first frame).
-    GameMenu(std::string game_id, std::string title);
+    // before the first frame). settings_file keeps the menu's own settings (the
+    // on-screen controls), e.g. <save dir>/rsdk-air.ini.
+    GameMenu(std::string game_id, std::string title, std::filesystem::path settings_file);
     ~GameMenu();
     GameMenu(const GameMenu &) = delete;
     GameMenu &operator=(const GameMenu &) = delete;

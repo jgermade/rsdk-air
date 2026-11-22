@@ -89,6 +89,23 @@ rsdkair_patch_begin(drawing "${UP}/RSDKv5/RSDK/Graphics/Drawing.cpp")
 rsdkair_patch_replace(drawing [=[#include "SDL2/SDL2RenderDevice.cpp"]=]
 "#include \"${RSDKV5_SDL2RENDERDEVICE_CPP}\" // rsdk-air: patched copy")
 rsdkair_patch_end(drawing RSDKV5_DRAWING_CPP)
+# On-screen controls: their buttons are added as held, for player 1 and "any", before the
+# engine works out presses and releases from what its input devices reported.
+rsdkair_patch_begin(input "${UP}/RSDKv5/RSDK/Input/Input.cpp")
+rsdkair_patch_replace(input [=[#include "RSDK/Core/RetroEngine.hpp"]=]
+[=[#include "RSDK/Core/RetroEngine.hpp"
+
+void rsdkair_rsdkv5_apply_pad(); // rsdk-air: rsdkv5_module.cpp]=])
+rsdkair_patch_replace(input [=[#if !RETRO_REV02 && RETRO_INPUTDEVICE_KEYBOARD
+    RSDK::SKU::HandleSpecialKeys();
+#endif
+]=]
+[=[#if !RETRO_REV02 && RETRO_INPUTDEVICE_KEYBOARD
+    RSDK::SKU::HandleSpecialKeys();
+#endif
+    rsdkair_rsdkv5_apply_pad(); // rsdk-air: the in-game menu's on-screen controls
+]=])
+rsdkair_patch_end(input RSDKV5_INPUT_CPP)
 
 set(V5 "${UP}/RSDKv5")
 set(RSDKV5_SOURCES
@@ -107,7 +124,7 @@ set(RSDKV5_SOURCES
     ${V5}/RSDK/Graphics/Palette.cpp
     ${V5}/RSDK/Graphics/Video.cpp
     ${V5}/RSDK/Audio/Audio.cpp
-    ${V5}/RSDK/Input/Input.cpp
+    ${RSDKV5_INPUT_CPP}
     ${V5}/RSDK/Scene/Scene.cpp
     ${V5}/RSDK/Scene/Collision.cpp
     ${V5}/RSDK/Scene/Object.cpp
@@ -167,6 +184,7 @@ endif()
 target_include_directories(rsdkv5 PRIVATE
     "${PROJECT_SOURCE_DIR}/engines/common"
     "${V5}/RSDK/Graphics"  # the patched Drawing.cpp's relative includes (Legacy/, SDL2/…)
+    "${V5}/RSDK/Input"     # the patched Input.cpp's (SDL2/, Keyboard/…)
     "${V5}"
     "${UP}/dependencies/all"
     "${UP}/dependencies/all/tinyxml2"
