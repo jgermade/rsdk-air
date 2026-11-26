@@ -98,6 +98,137 @@ rsdkair_patch_replace(input [=[            if (keyState[inputDevice[i].keyMappin
                 if (!inputDevice[INPUT_ANY].hold)]=])
 rsdkair_patch_replace(input [=[            if (getControllerButton(inputDevice[i].contMappings)) {]=]
 [=[            if (getControllerButton(inputDevice[i].contMappings) || rsdkair_rsdkv4_pad_held(i)) { // rsdk-air]=])
+# Gamepads: upstream finds the pads at start (InitInputDevices) and then follows
+# SDL_CONTROLLERDEVICEADDED/REMOVED, which the in-game menu consumes while it is open, so
+# a pad plugged in then never worked and one unplugged then stayed in the list. Every
+# input frame now matches the engine's list against SDL's (as RSDKv3, see
+# engines/rsdkv3/CMakeLists.txt). Upstream bugs fixed on the way: InitInputDevices opened
+# device indices 0..n-1 instead of the ones that are game controllers (Android lists the
+# accelerometer as a joystick, so the pad could be skipped) and left hapticPtr unset;
+# controllerInit told pads apart by device index, which changes as pads come and go;
+# controllerClose read the element after the one it erased. Pads are now keyed by their
+# instance ID (InputDevice::index). The SDL1 paths are not built here.
+rsdkair_patch_replace(input [=[void controllerInit(int controllerID)
+{
+    for (int i = 0; i < controllers.size(); ++i) {
+        if (controllers[i].id == controllerID) {
+            return; // we already opened this one!
+        }
+    }
+]=]
+[=[// rsdk-air: see engines/rsdkv4/CMakeLists.txt
+static bool rsdkair_has_pad(SDL_JoystickID id)
+{
+    for (const InputDevice &device : controllers) {
+        if (device.index == id)
+            return true;
+    }
+    return false;
+}
+
+static bool rsdkair_open_pad(int deviceIndex)
+{
+    if (!SDL_IsGameController(deviceIndex) || rsdkair_has_pad(SDL_JoystickGetDeviceInstanceID(deviceIndex)))
+        return false;
+    SDL_GameController *controller = SDL_GameControllerOpen(deviceIndex);
+    if (!controller) {
+        PrintLog("Could not open controller...\nSDL_GetError() -> %s", SDL_GetError());
+        return false;
+    }
+    InputDevice device;
+    device.id        = deviceIndex;
+    device.index     = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller));
+    device.devicePtr = controller;
+    device.hapticPtr = SDL_HapticOpenFromJoystick(SDL_GameControllerGetJoystick(controller));
+    if (device.hapticPtr && SDL_HapticRumbleInit(device.hapticPtr) < 0) {
+        SDL_HapticClose(device.hapticPtr);
+        device.hapticPtr = nullptr;
+    }
+    controllers.push_back(device);
+    return true;
+}
+
+static void rsdkair_close_pad(size_t i)
+{
+    if (controllers[i].hapticPtr)
+        SDL_HapticClose(controllers[i].hapticPtr);
+    if (controllers[i].devicePtr)
+        SDL_GameControllerClose(controllers[i].devicePtr);
+    controllers.erase(controllers.begin() + i);
+}
+
+// inputType as upstream's controllerInit/controllerClose set it: a new pad selects the
+// pads, losing the last one selects the keyboard; otherwise ProcessInput switches it to
+// whatever was pressed last.
+static void rsdkair_sync_pads()
+{
+    const bool had_pads = !controllers.empty();
+    for (size_t i = controllers.size(); i-- > 0;) {
+        if (!controllers[i].devicePtr || !SDL_GameControllerGetAttached(controllers[i].devicePtr))
+            rsdkair_close_pad(i);
+    }
+    for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+        if (rsdkair_open_pad(i))
+            inputType = 1;
+    }
+    if (had_pads && controllers.empty())
+        inputType = 0;
+}
+
+void controllerInit(int controllerID)
+{
+    if (rsdkair_open_pad(controllerID))
+        inputType = 1;
+}
+
+static void rsdkair_upstream_controllerInit(int controllerID) // upstream, unused
+{
+    for (int i = 0; i < controllers.size(); ++i) {
+        if (controllers[i].id == controllerID) {
+            return; // we already opened this one!
+        }
+    }
+]=])
+rsdkair_patch_replace(input [=[void controllerClose(int controllerID)
+{
+#if RETRO_USING_SDL2
+    SDL_GameController *controller = SDL_GameControllerFromInstanceID(controllerID);]=]
+[=[void controllerClose(int controllerID) // rsdk-air: controllerID is the instance ID
+{
+    for (size_t i = 0; i < controllers.size(); ++i) {
+        if (controllers[i].index == controllerID) {
+            rsdkair_close_pad(i);
+            break;
+        }
+    }
+    if (controllers.empty())
+        inputType = 0;
+}
+
+static void rsdkair_upstream_controllerClose(int controllerID) // upstream, unused
+{
+#if RETRO_USING_SDL2
+    SDL_GameController *controller = SDL_GameControllerFromInstanceID(controllerID);]=])
+rsdkair_patch_replace(input [=[    int joyStickCount = SDL_NumJoysticks();
+    controllers.clear();]=]
+[=[    controllers.clear();
+    for (int i = 0; i < SDL_NumJoysticks(); ++i) // rsdk-air: only the game controllers
+        rsdkair_open_pad(i);
+    PrintLog("Found %d gamepads!", (int)controllers.size());
+    if (!controllers.empty())
+        SDL_GameControllerEventState(SDL_ENABLE);
+    return;
+
+    int joyStickCount = SDL_NumJoysticks();]=])
+rsdkair_patch_replace(input [=[void ProcessInput()
+{
+#if RETRO_USING_SDL2
+]=]
+[=[void ProcessInput()
+{
+#if RETRO_USING_SDL2
+    rsdkair_sync_pads(); // rsdk-air
+]=])
 rsdkair_patch_end(input RSDKV4_INPUT_CPP)
 foreach(pad VirtualDPad VirtualDPadM)
     rsdkair_patch_begin(${pad} "${UP}/RSDKv4/NativeObjects/${pad}.cpp")
