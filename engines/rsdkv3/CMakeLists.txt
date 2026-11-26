@@ -73,6 +73,65 @@ rsdkair_patch_replace(input [=[            if (keyState[inputDevice[i].keyMappin
                 if (!inputDevice[INPUT_ANY].hold)]=])
 rsdkair_patch_replace(input [=[            if (getControllerButton(inputDevice[i].contMappings)) {]=]
 [=[            if (getControllerButton(inputDevice[i].contMappings) || rsdkair_rsdkv3_pad_held(i)) { // rsdk-air]=])
+# Gamepads: upstream opens a pad only on SDL_CONTROLLERDEVICEADDED. The launcher's start
+# screen and in-game menu poll events before the engine does, so those events (sent once,
+# for the pads already plugged in) never reach it and no pad works. RSDKv4 enumerates the
+# pads at start; here every input frame matches the engine's list against SDL's, which
+# also catches pads plugged in or out while the menu was open. ControllerInit no longer
+# adds a pad twice.
+rsdkair_patch_replace(input [=[void ControllerInit(byte controllerID)
+{
+    SDL_GameController *controller = SDL_GameControllerOpen(controllerID);]=]
+[=[static bool rsdkair_has_pad(SDL_JoystickID id) // rsdk-air
+{
+    for (SDL_GameController *c : controllers) {
+        if (SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(c)) == id)
+            return true;
+    }
+    return false;
+}
+
+static void rsdkair_sync_pads() // rsdk-air: see engines/rsdkv3/CMakeLists.txt
+{
+    // inputType as upstream's ControllerInit/ControllerClose set it: a new pad selects
+    // the pads, losing the last one selects the keyboard; otherwise the engine keeps
+    // switching it to whatever was pressed last.
+    const bool had_pads = !controllers.empty();
+    for (auto it = controllers.begin(); it != controllers.end();) {
+        if (!SDL_GameControllerGetAttached(*it)) {
+            SDL_GameControllerClose(*it);
+            it = controllers.erase(it);
+        }
+        else {
+            ++it;
+        }
+    }
+    for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+        if (SDL_IsGameController(i) && !rsdkair_has_pad(SDL_JoystickGetDeviceInstanceID(i))) {
+            if (SDL_GameController *c = SDL_GameControllerOpen(i)) {
+                controllers.push_back(c);
+                inputType = 1;
+            }
+        }
+    }
+    if (had_pads && controllers.empty())
+        inputType = 0;
+}
+
+void ControllerInit(byte controllerID)
+{
+    if (rsdkair_has_pad(SDL_JoystickGetDeviceInstanceID(controllerID))) // rsdk-air
+        return;
+    SDL_GameController *controller = SDL_GameControllerOpen(controllerID);]=])
+rsdkair_patch_replace(input [=[void ProcessInput()
+{
+#if RETRO_USING_SDL2
+]=]
+[=[void ProcessInput()
+{
+#if RETRO_USING_SDL2
+    rsdkair_sync_pads(); // rsdk-air
+]=])
 rsdkair_patch_end(input RSDKV3_INPUT_CPP)
 
 set(RSDKV3_SOURCES
