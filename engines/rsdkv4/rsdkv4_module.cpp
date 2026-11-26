@@ -279,6 +279,15 @@ void setup_menu(const RsdkAirHost *host)
     c.delete_slot = [](int slot) { rsdkv4_bridge::delete_save(slot); };
     c.set_pad = [](unsigned buttons) { g_pad = buttons; };
     c.hide_touch_controls = [](int hide) { g_touch_hidden = hide != 0; };
+    c.character_count = [] { return static_cast<int>(rsdkv4_bridge::characters().size()); };
+    c.character_get = [](int index, RsdkAirCharacter *out) {
+        const std::vector<int> ids = rsdkv4_bridge::characters();
+        if (!out || index < 0 || index >= static_cast<int>(ids.size()))
+            return 0;
+        out->id = ids[static_cast<std::size_t>(index)];
+        out->name = playerNames[out->id];
+        return 1;
+    };
 }
 
 bool supported(const char *id)

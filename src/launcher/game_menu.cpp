@@ -523,17 +523,29 @@ private:
 // The slot cards are rsdkv4-wasm's (src/app/app.css, craft's GameLauncher); the rest
 // follows its pause panel. Art: art/players/<name>.png, art/stages/<game>/*.png.
 
-constexpr const char *kPlayerArt[] = {"sonic", "tails", "knuckles", "sonictails"};
 constexpr ImU32 kGems[] = {IM_COL32(0x58, 0xe0, 0x58, 255), IM_COL32(0xf0, 0xa0, 0x38, 255),
                            IM_COL32(0xf0, 0x78, 0xd8, 255), IM_COL32(0x98, 0x78, 0xf0, 255),
                            IM_COL32(0xf0, 0xf0, 0xf0, 255), IM_COL32(0xf0, 0x78, 0x78, 255),
                            IM_COL32(0x78, 0xc0, 0xf8, 255)};
 struct PlayerBand {
+    const char *art;  // art/players/<art>.png
     float left, right;
     int r, g, b;
 };
-constexpr PlayerBand kBands[] = {
-    {0.30f, 0.20f, 13, 122, 233}, {0.40f, 0.10f, 241, 176, 0}, {0.20f, 0.30f, 255, 20, 0}, {0.20f, 0.70f, 160, 32, 240}};
+// The new-game card's colour band, by character picture; others take the first.
+constexpr PlayerBand kBands[] = {{"sonic", 0.30f, 0.20f, 13, 122, 233},         {"tails", 0.40f, 0.10f, 241, 176, 0},
+                                 {"knuckles", 0.20f, 0.30f, 255, 20, 0},        {"sonictails", 0.20f, 0.70f, 160, 32, 240},
+                                 {"amy", 0.25f, 0.25f, 255, 105, 180},          {"amytails", 0.15f, 0.60f, 250, 120, 90},
+                                 {"knucklestails", 0.20f, 0.55f, 240, 90, 20},  {"mighty", 0.30f, 0.25f, 200, 30, 30},
+                                 {"ray", 0.35f, 0.15f, 250, 205, 30}};
+const PlayerBand &band_for(const std::string &art)
+{
+    for (const PlayerBand &b : kBands) {
+        if (art == std::string("players/") + b.art + ".png")
+            return b;
+    }
+    return kBands[0];
+}
 constexpr float kBandFrames[][2] = {{0.3f, 0.2f}, {0.5f, 0.5f}, {0.1f, 0.2f}, {0.6f, 0.4f}, {0.7f, 0.1f}, {0.2f, 0.8f},
                                     {0.0f, 0.6f}, {0.4f, 0.1f}, {0.1f, 0.7f}, {0.8f, 0.0f}, {0.3f, 0.2f}};
 
@@ -576,7 +588,12 @@ struct GameMenu::Impl {
     ImTextureID frozen = ImTextureID_Invalid;
     ImVec2 frozen_uv0, frozen_uv1;
     std::array<rsdkv4::Slot, rsdkv4::kSlotCount> slots{};
-    std::array<int, 5> slot_char{};  // character for a new game per card (0 NO SAVE, 1-4)
+    std::array<int, 5> slot_char{};  // character for a new game per card (0 NO SAVE, 1-4), into `characters`
+    struct Character {
+        int id;  // what start_slot takes and a save stores
+        rsdkv4::CharacterLook look;
+    };
+    std::vector<Character> characters;  // the game's, from the engine (reload_slots)
     int stick_dir = 0;
     // The mouse pointer, for hover styles. Only a real mouse: touch has no hover, and keys or
     // pads hide it until the mouse moves again.
@@ -1165,8 +1182,40 @@ struct GameMenu::Impl {
 
     bool has_slots() const { return control && control->slots_kind == RSDKAIR_SLOTS_RSDKV4 && control->read_save_ram; }
 
+    // The engine's character list (ABI 4), or the four every release has.
+    void reload_characters()
+    {
+        characters.clear();
+        const int n = control && control->character_count && control->character_get ? control->character_count() : 0;
+        for (int i = 0; i < n; ++i) {
+            RsdkAirCharacter c{};
+            if (control->character_get(i, &c) && c.name)
+                characters.push_back({c.id, rsdkv4::character_look(c.name)});
+        }
+        if (characters.empty()) {
+            for (const char *name : {"SONIC", "TAILS", "KNUCKLES", "SONIC AND TAILS"})
+                characters.push_back({static_cast<int>(characters.size()), rsdkv4::character_look(name)});
+        }
+        for (int &c : slot_char) {
+            if (c < 0 || c >= static_cast<int>(characters.size()))
+                c = 0;
+        }
+    }
+
+    // A saved game's character: from the list, or by the original releases' ids (a save
+    // made with Plus on, opened with it off, still shows its picture).
+    rsdkv4::CharacterLook saved_look(int id) const
+    {
+        for (const Character &c : characters) {
+            if (c.id == id)
+                return c.look;
+        }
+        return rsdkv4::character_look(rsdkv4::character_name(id));
+    }
+
     void reload_slots()
     {
+        reload_characters();
         for (int i = 0; i < rsdkv4::kSlotCount; ++i) {
             slots[static_cast<std::size_t>(i)] = rsdkv4::Slot{};
             slots[static_cast<std::size_t>(i)].slot = i;
@@ -1451,7 +1500,7 @@ struct GameMenu::Impl {
     void start_slot(const Item &it)
     {
         const rsdkv4::Slot *s = saved(it);
-        const int player = s ? s->character : character(it);
+        const int player = s ? s->character : characters[static_cast<std::size_t>(character(it))].id;
         if (control->start_slot)
             control->start_slot(it.kind == Kind::NoSave ? -1 : it.arg, player);
         close();
@@ -1555,10 +1604,11 @@ struct GameMenu::Impl {
         Item &it = items[static_cast<std::size_t>(focus)];
         if (picking) {
             int &ch = character(it);
+            const int n = static_cast<int>(characters.size());
             if (a == Action::Left || a == Action::Up)
-                ch = (ch + 3) % 4;
+                ch = (ch + n - 1) % n;
             else if (a == Action::Right || a == Action::Down)
-                ch = (ch + 1) % 4;
+                ch = (ch + 1) % n;
             else if (a == Action::Accept)
                 start_slot(it);
             else if (a == Action::Back)
@@ -1653,7 +1703,7 @@ struct GameMenu::Impl {
             if (hit(p, it.pick_min, it.pick_max)) {
                 focus = index;
                 int &ch = character(it);
-                ch = (ch + 1) % 4;
+                ch = (ch + 1) % static_cast<int>(characters.size());
                 return;
             }
             if (hit(p, it.button_min, it.button_max)) {
@@ -1988,7 +2038,7 @@ struct GameMenu::Impl {
 
         if (!s) {
             // New game: the character large on white, two colour bands, PLAY.
-            const int ch = std::clamp(character(it), 0, 3);
+            const rsdkv4::CharacterLook &look = characters[static_cast<std::size_t>(character(it))].look;
             const ImVec2 pmin = in_min, pmax(in_max.x, in_min.y + in_w);
             dl->AddRectFilled(pmin, pmax, IM_COL32_WHITE);
             auto band = [&](float left, float right, ImU32 col) {
@@ -2005,7 +2055,7 @@ struct GameMenu::Impl {
                 right = kBandFrames[i][1] + (kBandFrames[i + 1][1] - kBandFrames[i][1]) * m;
             };
             float gl = 3.0f * 16.0f * k / in_w, gr = 16.0f * k / in_w;
-            const PlayerBand &pb = kBands[ch];
+            const PlayerBand &pb = band_for(look.art);
             float cl = pb.left, cr = pb.right;
             if (focused) {
                 drift(20.0f, false, gl, gr);
@@ -2014,12 +2064,12 @@ struct GameMenu::Impl {
             band(gl, gr, rgba(180, 180, 180, 51));
             band(cl, cr, rgba(pb.r, pb.g, pb.b, 51));
             const float top_pad = focused ? 0.0f : 16.0f * k, side_pad = focused ? 0.0f : 8.0f * k;
-            const ImTextureID tex = art(std::string("players/") + kPlayerArt[ch] + ".png", false);
+            const ImTextureID tex = look.art.empty() ? ImTextureID_Invalid : art(look.art, false);
             if (tex != ImTextureID_Invalid) {
                 draw_fit(dl, tex, 1.0f, ImVec2(pmin.x + side_pad, pmin.y + top_pad), ImVec2(pmax.x - side_pad, pmax.y),
                          false);
             } else {
-                const std::string name(rsdkv4::character_name(ch));
+                const std::string &name = look.label;
                 const ImVec2 ns = measure(font_bold, 15.0f * k, name);
                 text(dl, font_bold, 15.0f * k, ImVec2((pmin.x + pmax.x - ns.x) / 2, (pmin.y + pmax.y - ns.y) / 2),
                      rgba(40, 40, 50), name);
@@ -2074,7 +2124,8 @@ struct GameMenu::Impl {
             it.trash_max = ImVec2(tmax.x + grow, tmax.y + grow);
         }
         const float icon_h = 64.0f * k;
-        const ImTextureID player = art(std::string("players/") + kPlayerArt[std::clamp(s->character, 0, 3)] + ".png", false);
+        const rsdkv4::CharacterLook player_look = saved_look(s->character);
+        const ImTextureID player = player_look.art.empty() ? ImTextureID_Invalid : art(player_look.art, false);
         if (player != ImTextureID_Invalid) {
             const ImVec2 imax(smax.x, smax.y + 16.0f * k), imin(imax.x - icon_h, imax.y - icon_h);
             draw_fit(dl, player, 1.0f, ImVec2(imin.x + 2.0f * k, imin.y + 2.0f * k), ImVec2(imax.x + 2.0f * k, imax.y + 2.0f * k),

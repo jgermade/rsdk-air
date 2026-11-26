@@ -5,11 +5,20 @@
 // SPDX-License-Identifier: MIT (this file); it links against the RSDKv4 decompilation.
 #pragma once
 
+#include <vector>
+
 namespace rsdkv4_bridge {
+
+// The characters a new game can use: the game's player list (GameConfig, plus mods'
+// characters), as indices into it. A Plus-off build leaves out Amy and Amy & Tails
+// (PLAYER_AMY / PLAYER_AMY_TAILS), which its engine turns into Sonic anyway (Scene.cpp).
+// Empty when the engine read no list.
+std::vector<int> characters();
 
 // slot 0-3 with data: continue it. slot 0-3 empty: new game there as `player`.
 // slot < 0: no-save game as `player` (does not touch the save file).
-// player: 0 Sonic, 1 Tails, 2 Knuckles, 3 Sonic & Tails.
+// player: an index into the game's player list (characters()); without a list, 0 Sonic,
+// 1 Tails, 2 Knuckles, 3 Sonic & Tails.
 void start_game(int slot, int player);
 
 // Clears a slot and writes the save file, as the engine's own delete does.

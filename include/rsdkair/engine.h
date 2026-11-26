@@ -15,8 +15,10 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to the structs or functions below.
- * 2: RsdkAirEngineArgs::host, for the in-game menu (RsdkAirHost, RsdkAirEngineControl). */
-#define RSDKAIR_ABI_VERSION 3
+ * 2: RsdkAirEngineArgs::host, for the in-game menu (RsdkAirHost, RsdkAirEngineControl).
+ * 3: RsdkAirSetting::restart.
+ * 4: RsdkAirEngineControl::character_count / character_get (RsdkAirCharacter). */
+#define RSDKAIR_ABI_VERSION 4
 
 #if defined(_WIN32)
 #define RSDKAIR_EXPORT __declspec(dllexport)
@@ -56,6 +58,12 @@ typedef struct RsdkAirSetting {
     int value;
     int restart;                /* ABI 3: 1 when a change applies the next time the game starts */
 } RsdkAirSetting;
+
+/* A character the game offers for a new game (RsdkAirEngineControl::character_get). */
+typedef struct RsdkAirCharacter {
+    int id;           /* the game's player-list index */
+    const char *name; /* the game's name for it, UTF-8 */
+} RsdkAirCharacter;
 
 /* Save slots the menu shows, by their engine's layout. */
 #define RSDKAIR_SLOTS_NONE 0
@@ -100,6 +108,14 @@ typedef struct RsdkAirEngineControl {
      * hide_touch_controls: 1 hides the game's own touch controls, 0 shows them again. */
     void (*set_pad)(unsigned buttons);
     void (*hide_touch_controls)(int hide);
+
+    /* Characters for a new game (save slots): the game's own player list, in its order,
+     * without the Plus characters when the build has Plus off. `id` is what start_slot
+     * takes and what a save stores; `name` is the game's (e.g. "SONIC AND TAILS") and
+     * stays valid until the next call. NULL or a count of 0: ids 0-3 (Sonic, Tails,
+     * Knuckles, Sonic & Tails). */
+    int (*character_count)(void);
+    int (*character_get)(int index, RsdkAirCharacter *out);
 } RsdkAirEngineControl;
 
 /* The host's hooks, given to the module. ctx goes back as the first argument. */

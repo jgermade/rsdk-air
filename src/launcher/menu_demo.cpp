@@ -1,8 +1,11 @@
 // rsdkair_menu_demo: a stand-in engine for trying the in-game menu (game_menu.cpp)
 // without game data. Built with the tests, never installed.
 //
-//   rsdkair_menu_demo gl1 [--no-slots]   OpenGL 1.x fixed function, as RSDKv3/v4
-//   rsdkair_menu_demo sdl [--no-slots]   SDL_Renderer with a logical size, as RSDKv5
+//   rsdkair_menu_demo gl1 [--no-slots|--plus]   OpenGL 1.x fixed function, as RSDKv3/v4
+//   rsdkair_menu_demo sdl [--no-slots|--plus]   SDL_Renderer with a logical size, as RSDKv5
+//
+// --plus: the engine lists a Plus player list (Amy, Amy & Tails), as a Plus build with
+// Origins data would, and slot 2 holds a game as Amy.
 //
 // It draws a moving test pattern with the same kind of state the engines leave behind,
 // calls the menu's hooks as a patched engine does, and offers fake settings, screens and
@@ -71,6 +74,9 @@ int read_save_ram(int *out, int count)
 }
 
 void start_slot(int slot, int player) { std::printf("start slot %d as %d\n", slot, player); }
+
+// What a Plus build would list with Origins data (names as a GameConfig spells them).
+constexpr const char *kPlusPlayers[] = {"SONIC", "TAILS", "KNUCKLES", "SONIC AND TAILS", "AMY", "AMY AND TAILS"};
 void delete_slot(int slot)
 {
     for (int i = 0; i < 8; ++i)
@@ -85,10 +91,15 @@ int main(int argc, char **argv)
     std::setvbuf(stdout, nullptr, _IOLBF, 0);  // lines show up even if it is killed
     const bool gl = argc > 1 && std::strcmp(argv[1], "gl1") == 0;
     const bool slots = !(argc > 2 && std::strcmp(argv[2], "--no-slots") == 0);
+    const bool plus = argc > 2 && std::strcmp(argv[2], "--plus") == 0;
     // A Sonic 2 save: slot 1 Tails in Aquatic Ruin 2, slot 3 Sonic & Tails in a special stage.
     const int s1[8] = {1, 4, 23450, 50000, 6, 2, 2, 0}, s3[8] = {3, 7, 98760, 50000, 131, 7, 3, 0};
     std::memcpy(&g_ram[0], s1, sizeof(s1));
     std::memcpy(&g_ram[16], s3, sizeof(s3));
+    if (plus) {  // slot 2 as Amy in Chemical Plant 1
+        const int s2[8] = {4, 3, 5120, 50000, 2, 0, 0, 0};
+        std::memcpy(&g_ram[8], s2, sizeof(s2));
+    }
 
     // Mouse clicks also arrive as touches, to try the on-screen controls on a desktop
     // (enable them in menu_demo.ini: [Touch] Enabled=true).
@@ -144,6 +155,16 @@ int main(int argc, char **argv)
         control.read_save_ram = read_save_ram;
         control.start_slot = start_slot;
         control.delete_slot = delete_slot;
+    }
+    if (plus) {
+        control.character_count = [] { return static_cast<int>(sizeof(kPlusPlayers) / sizeof(kPlusPlayers[0])); };
+        control.character_get = [](int i, RsdkAirCharacter *out) {
+            if (!out || i < 0 || i >= 6)
+                return 0;
+            out->id = i;
+            out->name = kPlusPlayers[i];
+            return 1;
+        };
     }
 
     host->attach(host->ctx, &control, 1);  // the start screen, before the first frame

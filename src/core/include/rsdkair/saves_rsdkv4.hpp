@@ -6,6 +6,8 @@
 // (the same one rsdkv4-wasm's bridge reads).
 #pragma once
 
+#include <rsdkair/characters_rsdkv4.hpp>
+
 #include <array>
 #include <cstdint>
 #include <filesystem>
@@ -73,7 +75,10 @@ std::optional<SlotZone> describe_slot(std::string_view game_id, const Slot &slot
 int emerald_count(std::string_view game_id, const Slot &slot);
 int emerald_total(std::string_view game_id);  // 6 in Sonic 1, 7 in Sonic 2
 
-// "Sonic", "Tails", "Knuckles", "Sonic & Tails".
+// "Sonic", "Tails", "Knuckles", "Sonic & Tails": the four characters of every release,
+// for when the engine does not list its own (see character_look).
 std::string_view character_name(int character);
+
+// character_look(): <rsdkair/characters_rsdkv4.hpp> (C++17, for the engine module too).
 
 } // namespace rsdkair::rsdkv4
