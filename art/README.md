@@ -33,7 +33,8 @@ which redraws rsdkv4-wasm's load-game screen (craft's slot cards).
 
 | Files | Source | Changes |
 | --- | --- | --- |
-| `players/{sonic,tails,knuckles,sonictails}.png` | rsdkv4-wasm `src/craft/assets/player-*.svg` (commit `a53c681`) | SVG rendered to 256 x 256 PNG with a transparent background (Chromium) |
+| `players/{tails,knuckles}.png` | rsdkv4-wasm `src/craft/assets/player-*.svg` (commit `a53c681`) | SVG rendered to 256 x 256 PNG with a transparent background (Chromium) |
+| `players/{sonic,amy,mighty,ray,amytails,knucklestails,sonictails}.png` | Provided by the project owner on 2026-11-26 as 2000 x 2000 JPEGs of pixel art on white; where they come from is not recorded yet | Pixel grid (about 27.5 px per pixel) sampled back to the sprite, cell by cell (median of each cell's centre, which drops the JPEG noise); the white background connected to the border made transparent. Heights from SEGA's 2023 official height chart with `knuckles.png` (249 px) as the reference: Sonic 94.6 %, Amy 91.2 % of Knuckles; Mighty as Sonic and Ray as Amy (not in the chart). The pairs share one Tails drawing: it was separated from the partner (pixels where at least two of the three images agree) and drawn at one scale in all three, with each partner at its own height in front. 256 x 256, transparent, feet on the bottom edge, centred. Sonic and Sonic & Tails replace the rsdkv4-wasm ones; the rest are Plus characters, not used by the code yet |
 | `stages/sonic1/zone-1..7.png`, `stages/sonic1/special.png` | rsdkv4-wasm `src/craft/assets/stages-sonic1/` | none (140 x 80 PNG) |
 | `stages/sonic2/zone-1..10.png`, `stages/sonic2/special.png` | rsdkv4-wasm `src/craft/assets/stages-sonic2/` | none (140 x 80 PNG) |
 

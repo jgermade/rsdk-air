@@ -6,13 +6,15 @@
 
 #include "RetroEngine.hpp"
 
+#include <rsdkair/characters_rsdkv4.hpp>
+
 namespace rsdkv4_bridge {
 
 namespace {
 
 // One save slot is 8 ints of saveRAM (Debug.cpp, STARTMENU_SAVESEL).
 enum SaveField {
-    SAVE_CHARACTER = 0, // 0 Sonic, 1 Tails, 2 Knuckles, 3 Sonic & Tails
+    SAVE_CHARACTER = 0, // index into the player list (0 Sonic, 1 Tails, 2 Knuckles, 3 Sonic & Tails)
     SAVE_LIVES,
     SAVE_SCORE,
     SAVE_BONUS,
@@ -33,7 +35,34 @@ void clear_slot(int base, int character, int zone)
     saveRAM[base + 7]               = 0;
 }
 
+// Tails comes along as player 2 for a pair ("SONIC AND TAILS", "AMY AND TAILS"). Without a
+// list, or for an index-3 name we cannot read, it is the original releases' Sonic & Tails.
+bool with_tails(int player)
+{
+    if (player < 0 || player >= playerCount)
+        return player == 3;
+    const rsdkair::rsdkv4::CharacterLook look = rsdkair::rsdkv4::character_look(playerNames[player]);
+    return look.with_tails || (player == 3 && look.art.empty());
+}
+
 } // namespace
+
+std::vector<int> characters()
+{
+    std::vector<int> ids;
+#if RSDK_AUTOBUILD
+    const int amy = GetGlobalVariableByName("PLAYER_AMY");
+    const int amy_tails = GetGlobalVariableByName("PLAYER_AMY_TAILS");
+#endif
+    for (int p = 0; p < playerCount; ++p) {
+#if RSDK_AUTOBUILD
+        if ((amy && p == amy) || (amy_tails && p == amy_tails))
+            continue;
+#endif
+        ids.push_back(p);
+    }
+    return ids;
+}
 
 void enter_game_loop()
 {
@@ -54,7 +83,7 @@ void delete_save(int slot)
 
 void start_game(int slot, int player)
 {
-    if (player < 0 || player > 3)
+    if (player < 0 || player >= (playerCount > 0 ? playerCount : 4))
         player = 0;
 
     if (slot >= 0 && slot <= 3 && saveRAM[(slot << 3) + SAVE_ZONE]) {
@@ -67,7 +96,7 @@ void start_game(int slot, int player)
         SetGlobalVariableByName("player.scoreBonus", saveRAM[base + SAVE_BONUS]);
         SetGlobalVariableByName("specialStage.emeralds", saveRAM[base + SAVE_EMERALDS]);
         SetGlobalVariableByName("specialStage.listPos", saveRAM[base + SAVE_SPECIALPOS]);
-        SetGlobalVariableByName("stage.player2Enabled", saveRAM[base + SAVE_CHARACTER] == 3);
+        SetGlobalVariableByName("stage.player2Enabled", with_tails(saveRAM[base + SAVE_CHARACTER]));
         SetGlobalVariableByName("lampPostID", 0); // Sonic 1
         SetGlobalVariableByName("starPostID", 0); // Sonic 2
         SetGlobalVariableByName("options.vsMode", 0);
@@ -104,7 +133,7 @@ void start_game(int slot, int player)
     SetGlobalVariableByName("player.scoreBonus", 50000);
     SetGlobalVariableByName("specialStage.emeralds", 0);
     SetGlobalVariableByName("specialStage.listPos", 0);
-    SetGlobalVariableByName("stage.player2Enabled", player == 3);
+    SetGlobalVariableByName("stage.player2Enabled", with_tails(player));
     SetGlobalVariableByName("lampPostID", 0); // Sonic 1
     SetGlobalVariableByName("starPostID", 0); // Sonic 2
     SetGlobalVariableByName("options.vsMode", 0);

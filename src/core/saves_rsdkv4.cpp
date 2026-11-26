@@ -3,7 +3,9 @@
 #include <rsdkair/paths.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
+#include <string>
 #include <system_error>
 #include <vector>
 
@@ -200,6 +202,63 @@ std::string_view character_name(int character)
     case 3: return "Sonic & Tails";
     default: return "Sonic";
     }
+}
+
+CharacterLook character_look(std::string_view engine_name)
+{
+    // Words of letters, upper-cased; joiners dropped.
+    std::vector<std::string> words;
+    std::string word;
+    auto flush = [&] {
+        if (!word.empty() && word != "AND" && word != "WITH")
+            words.push_back(word);
+        word.clear();
+    };
+    for (const char ch : engine_name) {
+        if (std::isalpha(static_cast<unsigned char>(ch)))
+            word.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(ch))));
+        else
+            flush();
+    }
+    flush();
+
+    struct Known {
+        const char *word, *label, *art;
+    };
+    static constexpr Known kKnown[] = {{"SONIC", "Sonic", "sonic"},          {"TAILS", "Tails", "tails"},
+                                       {"MILES", "Tails", "tails"},          {"KNUCKLES", "Knuckles", "knuckles"},
+                                       {"AMY", "Amy", "amy"},                {"MIGHTY", "Mighty", "mighty"},
+                                       {"RAY", "Ray", "ray"}};
+    auto known = [](const std::string &w) -> const Known * {
+        for (const Known &k : kKnown) {
+            if (w == k.word)
+                return &k;
+        }
+        return nullptr;
+    };
+
+    CharacterLook look;
+    const Known *first = words.size() == 1 ? known(words[0]) : nullptr;
+    const Known *lead = words.size() == 2 ? known(words[0]) : nullptr;
+    if (first) {
+        look.label = first->label;
+        look.art = std::string("players/") + first->art + ".png";
+    } else if (lead && words[1] == "TAILS" && std::string_view(lead->art) != "tails") {
+        look.label = std::string(lead->label) + " & Tails";
+        look.art = std::string("players/") + lead->art + "tails.png";
+        look.with_tails = true;
+    } else {
+        // Unknown: the name as given, title-cased.
+        bool start = true;
+        for (const char ch : engine_name) {
+            const unsigned char u = static_cast<unsigned char>(ch);
+            look.label.push_back(static_cast<char>(start ? std::toupper(u) : std::tolower(u)));
+            start = !std::isalpha(u);
+        }
+        // Still a pair if it ends in "TAILS" after another name (player 2 comes along).
+        look.with_tails = words.size() >= 2 && words.back() == "TAILS";
+    }
+    return look;
 }
 
 } // namespace rsdkair::rsdkv4

@@ -484,6 +484,23 @@ void test_saves_rsdkv4_labels()
     CHECK(rsdkv4::emerald_count("sonic2", slot) == 3);
     CHECK(rsdkv4::character_name(3) == "Sonic & Tails");
     CHECK(rsdkv4::character_name(9) == "Sonic");
+
+    auto look = rsdkv4::character_look("SONIC");
+    CHECK(look.label == "Sonic" && look.art == "players/sonic.png" && !look.with_tails);
+    look = rsdkv4::character_look("SONIC AND TAILS");
+    CHECK(look.label == "Sonic & Tails" && look.art == "players/sonictails.png" && look.with_tails);
+    look = rsdkv4::character_look("Amy & Tails");
+    CHECK(look.label == "Amy & Tails" && look.art == "players/amytails.png" && look.with_tails);
+    look = rsdkv4::character_look("KNUCKLES+TAILS");
+    CHECK(look.label == "Knuckles & Tails" && look.art == "players/knucklestails.png" && look.with_tails);
+    look = rsdkv4::character_look("MILES");
+    CHECK(look.label == "Tails" && look.art == "players/tails.png" && !look.with_tails);
+    look = rsdkv4::character_look("amy");
+    CHECK(look.label == "Amy" && look.art == "players/amy.png");
+    look = rsdkv4::character_look("TAILS AND TAILS");  // not a known pair
+    CHECK(look.art.empty() && look.label == "Tails And Tails" && look.with_tails);
+    look = rsdkv4::character_look("METAL SONIC");  // a mod's character
+    CHECK(look.art.empty() && look.label == "Metal Sonic" && !look.with_tails);
 }
 
 #ifdef RSDKAIR_RSDKV4_MODULE
